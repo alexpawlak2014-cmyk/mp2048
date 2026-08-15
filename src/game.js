@@ -171,6 +171,7 @@ export class MP2048 {
     this.wallet = loadStars();
     this.upgrades = loadUpgrades();
     this.settings = loadSettings();
+    this.syncCap();
     this.menu = null;
     this.menuFrom = "title";
     this.runStars = 0;
@@ -274,6 +275,22 @@ export class MP2048 {
   startValue() {
     if (this.sandbox) return fromTier(this.sandboxTier);
     return fromTier(1 + this.up("start"));
+  }
+
+  capTier() {
+    const bump = this.up("start");
+    if (this.superMode) return 128 + bump;
+    if (this.infinity) return 63 + bump;
+    return 11 + bump;
+  }
+
+  modeMax() {
+    if (this.sandbox || this.endless) return null;
+    return fromTier(this.capTier());
+  }
+
+  syncCap() {
+    this.maxValue = this.modeMax();
   }
 
   up(id) {
@@ -414,7 +431,11 @@ export class MP2048 {
     this.refreshWallet();
     this.sfx.sparkle(6);
     if (id === "start") {
+      this.syncCap();
+      this.texCache.clear();
+      this.matCache.clear();
       this.resetPlayerPose();
+      this.applyModeChrome();
       if (this.state === "title" || this.menuFrom === "title") {
         this.loadLevel(this.levelIndex, false);
       }
@@ -445,7 +466,7 @@ export class MP2048 {
     if (this.endless) return { endless: true, minTier: start, climb: 256, topTier: start + 1024n };
     if (this.superMode) return { minTier: start, climb: 127, topTier: start + 127n };
     if (this.infinity) return { minTier: start, climb: 62, topTier: start + 62n };
-    return { minTier: start };
+    return { minTier: start, topTier: start + 10n };
   }
 
   loadBest() {
@@ -1337,11 +1358,11 @@ export class MP2048 {
         ? "Merges never cap. Balls climb toward 2^1024 and past it. Infinity is the point."
         : mode === "sandbox"
           ? `Any map, your size. 1=2, 2=4, 3=8. Starting at ${this.sandboxTier >= 40n ? `2^${this.sandboxTier}` : shortValue(fromTier(this.sandboxTier))} on ${this.sandboxMapLabel()}.`
-          : mode === "super"
-            ? `No ceiling but 2^128. Climb to ${SUPER_LABEL}. The rainbow at the end of the integer.`
-            : mode === "inf"
-              ? "Same merge run, no 2048 cap. Climb all the way to 9,223,372,036,854,775,808."
-              : "Steer into matching numbers to grow. Spikes cut you in half. Fall off the rail and you start over. Can you make the rainbow ball?";
+            : mode === "super"
+              ? `No ceiling but ${shortValue(this.modeMax())}. Climb to 2^${this.capTier()}.`
+              : mode === "inf"
+                ? `Same merge run, no 2048 cap. Climb all the way to ${shortValue(this.modeMax())}.`
+                : `Steer into matching numbers to grow. Spikes cut you in half. Fall off the rail and you start over. Can you make ${shortValue(this.modeMax())}?`;
   }
 
   setMode(mode) {
@@ -1350,8 +1371,7 @@ export class MP2048 {
     this.endless = mode === "endless";
     this.sandbox = mode === "sandbox";
     this.infinity = mode !== "2048";
-    this.maxValue =
-      mode === "super" ? MAX_SUPER : mode === "inf" ? MAX_INF : mode === "2048" ? MAX_2048 : null;
+    this.syncCap();
     this.best = this.loadBest();
     this.refreshBest();
     this.applyModeChrome();
@@ -1426,6 +1446,7 @@ export class MP2048 {
     this.winPadIndex = -1;
     this.squash = 1;
     this.failKind = "fall";
+    this.syncCap();
     this.loadLevel(this.levelIndex, true);
     this.state = "play";
     this.invuln = 0.35;
@@ -2345,13 +2366,7 @@ export class MP2048 {
     const startZ = this.goalZ + tileL * 0.55;
     const playerTier = Math.max(1, tierOf(this.player.value));
     const uncapped = this.maxValue == null;
-    const last = uncapped
-      ? playerTier
-      : this.mapKind() === "super"
-        ? 128
-        : this.mapKind() === "inf"
-          ? 63
-          : 11;
+    const last = uncapped ? playerTier : this.capTier();
     let first = uncapped ? Math.max(1, last - 31) : 1;
     if (last - first + 1 > 36) first = last - 35;
     const stepY = this.heavyFx() ? 0.92 : 1.28;
@@ -2509,10 +2524,10 @@ export class MP2048 {
           : "NICE";
         this.els.endMsg.textContent = isRainbow(value, this.maxValue)
           ? this.superMode
-            ? `You hit ${SUPER_LABEL}. That is 2^128. There is no bigger unsigned joke.`
+            ? `You hit ${shortValue(value)} (2^${this.capTier()}).`
             : this.infinity
-              ? "You hit 9,223,372,036,854,775,808. That is the whole integer."
-              : "You made the rainbow ball. That is the whole game."
+              ? `You hit ${shortValue(value)}. That is the whole integer.`
+              : `You made the rainbow ball (${shortValue(value)}). That is the whole game.`
           : `You rolled in as ${shortValue(value)}. ${this.level.name} is done.`;
       }
     } else if (kind === "spike") {
