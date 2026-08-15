@@ -1,4 +1,4 @@
-import { radiusFor, tierOf } from "./values.js";
+import { radiusFor, magTier } from "./values.js";
 
 function mulberry32(seed) {
   let a = seed >>> 0;
@@ -87,9 +87,9 @@ function toBigTier(v, fallback = 1n) {
   }
 }
 
-function valueAt(z, goal, maxVal, rng, minTier = 1n) {
+function valueAt(z, goal, maxTier, rng, minTier = 1n) {
   minTier = toBigTier(minTier);
-  let maxTier = toBigTier(tierOf(maxVal));
+  maxTier = toBigTier(maxTier);
   if (maxTier < minTier) maxTier = minTier;
   const t = clamp(z / goal, 0, 1);
   const span = maxTier - minTier;
@@ -99,7 +99,7 @@ function valueAt(z, goal, maxVal, rng, minTier = 1n) {
   if (rng() < 0.18 && idx < maxTier) idx += 1n;
   if (idx < minTier) idx = minTier;
   if (idx > maxTier) idx = maxTier;
-  return 2n ** idx;
+  return idx;
 }
 
 function pairT(seg, r) {
@@ -107,10 +107,10 @@ function pairT(seg, r) {
   return Math.min(0.82, (r + 0.42) / half);
 }
 
-function placeBalls(segments, goal, rng, spec, maxVal, minTier = 1) {
+function placeBalls(segments, goal, rng, spec, maxTier, minTier = 1) {
   const balls = [];
   const layout = spec.layout;
-  const startVal = 2n ** toBigTier(minTier);
+  const startVal = toBigTier(minTier);
   let z = 14;
   balls.push([z, safeX(trackAt(segments, z), -0.55, radiusFor(startVal)), startVal]);
   balls.push([z, safeX(trackAt(segments, z), 0.55, radiusFor(startVal)), startVal]);
@@ -120,7 +120,7 @@ function placeBalls(segments, goal, rng, spec, maxVal, minTier = 1) {
 
   while (z < goal - 14) {
     const seg = trackAt(segments, z);
-    const value = z < 28 ? startVal : valueAt(z, goal, maxVal, rng, minTier);
+    const value = z < 28 ? startVal : valueAt(z, goal, maxTier, rng, minTier);
     const r = radiusFor(value);
     const off = pairT(seg, r);
     const pairChance =
@@ -134,13 +134,13 @@ function placeBalls(segments, goal, rng, spec, maxVal, minTier = 1) {
       balls.push([z, safeX(seg, (rng() - 0.5) * 0.28, r), value]);
     } else if (layout === "lanes") {
       balls.push([z, safeX(seg, -off, r), value]);
-      const other = rng() < 0.45 ? value : valueAt(z, goal, maxVal, rng, minTier);
+      const other = rng() < 0.45 ? value : valueAt(z, goal, maxTier, rng, minTier);
       balls.push([z, safeX(seg, off, radiusFor(other)), other]);
       if (rng() < 0.28 && r < 0.9) balls.push([z, safeX(seg, 0, radiusFor(startVal)), startVal]);
     } else if (layout === "scatter") {
       const n = 1 + Math.floor(rng() * 3);
       for (let k = 0; k < n; k++) {
-        const v = rng() < 0.7 ? value : valueAt(z, goal, maxVal, rng, minTier);
+        const v = rng() < 0.7 ? value : valueAt(z, goal, maxTier, rng, minTier);
         const vr = radiusFor(v);
         balls.push([z + k * Math.max(0.5, vr * 0.35), safeX(seg, rng() * 2 - 1, vr), v]);
       }
@@ -154,7 +154,7 @@ function placeBalls(segments, goal, rng, spec, maxVal, minTier = 1) {
         balls.push([z, safeX(seg, rng() * 2 - 1, r), value]);
       } else if (lanes === 2) {
         balls.push([z, safeX(seg, -off, r), value]);
-        const other = rng() < 0.4 ? value : valueAt(z, goal, maxVal, rng, minTier);
+        const other = rng() < 0.4 ? value : valueAt(z, goal, maxTier, rng, minTier);
         balls.push([z, safeX(seg, off, radiusFor(other)), other]);
       } else {
         balls.push([z, safeX(seg, -off, r), value]);
@@ -165,12 +165,12 @@ function placeBalls(segments, goal, rng, spec, maxVal, minTier = 1) {
     z += spec.ballGap + rng() * spec.ballJitter;
   }
 
-  const last = valueAt(goal - 10, goal, maxVal, rng, minTier);
+  const last = valueAt(goal - 10, goal, maxTier, rng, minTier);
   balls.push([goal - 10, safeX(trackAt(segments, goal - 10), 0.15, radiusFor(last)), last]);
   return balls;
 }
 
-function placeSpikes(segments, goal, rng, spec, infinity) {
+function placeSpikes(segments, goal, rng, spec, infinity, spikeMul = 1) {
   const spikes = [];
   let style = spec.spikeStyle;
   let count = spec.spikes;
@@ -184,6 +184,7 @@ function placeSpikes(segments, goal, rng, spec, infinity) {
     if (style === "pairs") count = Math.max(1, Math.ceil(count * 0.6));
     if (style === "bursts") style = "weave";
   }
+  count = Math.max(1, Math.round(count * spikeMul));
   if (count <= 0) return spikes;
   const start = 36;
   const span = Math.max(40, goal - 50 - start);
@@ -346,14 +347,13 @@ export function getLevel(index, infinity = false, superMode = false, extra = {})
       Number(minTier % 1000003n) * 17
   );
   const climb = extra.climb ?? (endless ? 256 : superMode ? 127 : infinity ? 62 : 0);
-  const covered = Math.max(4, tierOf(BigInt(spec.max)));
+  const covered = Math.max(4, magTier(BigInt(spec.max)));
   const goal = climb ? Math.round(spec.goal * (climb / covered)) : spec.goal;
   let topTier =
     extra.topTier != null
       ? toBigTier(extra.topTier)
-      : BigInt(endless ? 1024 : superMode ? 127 : infinity ? 62 : Math.max(1, tierOf(BigInt(spec.max))));
+      : BigInt(endless ? 1024 : superMode ? 128 : infinity ? 63 : Math.max(1, magTier(BigInt(spec.max))));
   if (topTier < minTier) topTier = minTier;
-  const max = 2n ** topTier;
   const segments = buildSegments(goal, spec);
   return {
     id: i + 1,
@@ -363,8 +363,15 @@ export function getLevel(index, infinity = false, superMode = false, extra = {})
     speed: spec.speed,
     path: spec.path,
     segments,
-    balls: placeBalls(segments, goal, rng, spec, max, minTier),
-    spikes: placeSpikes(segments, goal, rng, spec, infinity || superMode || endless),
+    balls: placeBalls(segments, goal, rng, spec, topTier, minTier),
+    spikes: placeSpikes(
+      segments,
+      goal,
+      rng,
+      spec,
+      infinity || superMode || endless,
+      extra.spikeMul || 1
+    ),
   };
 }
 

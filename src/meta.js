@@ -6,9 +6,8 @@ export const UPGRADE_LIST = [
   {
     id: "start",
     name: "Bigger Ball",
-    desc: "Start as 4 instead of 2. Rank up for 8, 16, 32, 64.",
-    max: 5,
-    costs: [25, 70, 140, 240, 360],
+    desc: "Start as 4 instead of 2. Buy again for 8, 16, 32… no cap.",
+    max: null,
   },
   {
     id: "life",
@@ -61,6 +60,13 @@ export const UPGRADE_LIST = [
   },
 ];
 
+export function upgradeCost(u, lv) {
+  if (u.max == null) {
+    return Math.max(25, Math.min(1e12, Math.round(25 * 1.55 ** lv)));
+  }
+  return u.costs[lv];
+}
+
 export function defaultUpgrades() {
   return Object.fromEntries(UPGRADE_LIST.map((u) => [u.id, 0]));
 }
@@ -107,7 +113,8 @@ export function loadUpgrades() {
   const out = defaultUpgrades();
   for (const u of UPGRADE_LIST) {
     const v = Number(data[u.id] || 0);
-    out[u.id] = Math.max(0, Math.min(u.max, Number.isFinite(v) ? Math.floor(v) : 0));
+    const n = Number.isFinite(v) ? Math.max(0, Math.floor(v)) : 0;
+    out[u.id] = u.max == null ? n : Math.min(u.max, n);
   }
   return out;
 }

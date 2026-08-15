@@ -66,7 +66,20 @@
           <button id="mode-inf" type="button" class="mode">INFINITY</button>
           <button id="mode-super" type="button" class="mode super">SUPER ∞</button>
           <button id="mode-endless" type="button" class="mode endless">∞∞</button>
+        </div>
+        <div class="mode-row">
+          <button id="mode-custom" type="button" class="mode custom">CUSTOM</button>
+          <button id="mode-half" type="button" class="mode half">HALF</button>
+          <button id="mode-halfinf" type="button" class="mode halfinf">HALF ∞</button>
           <button id="mode-sandbox" type="button" class="mode">SANDBOX</button>
+        </div>
+        <div id="custom-panel" class="hidden">
+          <p id="custom-label">CEILING 11 = 2048</p>
+          <div class="sandbox-size-row">
+            <button id="custom-minus" type="button" class="sandbox-step">−</button>
+            <input id="custom-size" type="text" inputmode="numeric" autocomplete="off" value="11" />
+            <button id="custom-plus" type="button" class="sandbox-step">+</button>
+          </div>
         </div>
         <div id="sandbox-panel" class="hidden">
           <p id="sandbox-label">SIZE 1 = 2</p>
@@ -81,6 +94,20 @@
             <button id="smap-inf" type="button" class="mode">INFINITY</button>
             <button id="smap-super" type="button" class="mode super">SUPER ∞</button>
             <button id="smap-endless" type="button" class="mode endless">∞∞</button>
+          </div>
+          <div class="mode-row sandbox-maps">
+            <button id="smap-custom" type="button" class="mode custom">CUSTOM</button>
+            <button id="smap-half" type="button" class="mode half">HALF</button>
+            <button id="smap-halfinf" type="button" class="mode halfinf">HALF ∞</button>
+          </div>
+          <div id="sandbox-ceil-wrap" class="hidden">
+            <p class="sandbox-map-kicker">CEILING</p>
+            <p id="sandbox-ceil-label">CEILING 11 = 2048</p>
+            <div class="sandbox-size-row">
+              <button id="sandbox-ceil-minus" type="button" class="sandbox-step">−</button>
+              <input id="sandbox-ceil-size" type="text" inputmode="numeric" autocomplete="off" value="11" />
+              <button id="sandbox-ceil-plus" type="button" class="sandbox-step">+</button>
+            </div>
           </div>
         </div>
         <button id="play" type="button">PLAY</button>

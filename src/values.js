@@ -1,14 +1,32 @@
-export const MAX_2048 = 2048n;
-export const MAX_INF = 2n ** 63n;
-export const MAX_SUPER = 2n ** 128n;
+export const MAX_2048 = 11n;
+export const MAX_INF = 63n;
+export const MAX_SUPER = 128n;
+export const FLOOR_HALF = -31n;
 export const SUPER_LABEL = "340,282,366,920,938,463,463,374,607,431,768,211,456";
 
 export function toVal(v) {
-  return typeof v === "bigint" ? v : BigInt(v);
+  try {
+    if (typeof v === "bigint") return v;
+    if (typeof v === "number" && Number.isFinite(v)) return BigInt(Math.trunc(v));
+    return BigInt(String(v));
+  } catch {
+    return 1n;
+  }
 }
 
 export function tierOf(value) {
-  let v = toVal(value);
+  const v = toVal(value);
+  if (v > 1000000n) return 1000000;
+  if (v < -1000000n) return -1000000;
+  return Number(v);
+}
+
+export function fromTier(tier) {
+  return toVal(tier);
+}
+
+export function magTier(magnitude) {
+  let v = toVal(magnitude);
   if (v <= 1n) return 0;
   let bits = 0;
   while (v > 0xffffffffn) {
@@ -19,30 +37,23 @@ export function tierOf(value) {
   return bits - 1;
 }
 
-export function fromTier(tier) {
-  return 2n ** BigInt(tier);
-}
-
 export function radiusFor(value) {
-  const tier = tierOf(value);
-  const visual = Math.min(tier, 26);
-  return 0.42 + Math.max(0, visual - 1) * 0.07;
+  const tier = Math.max(-12, Math.min(26, tierOf(value)));
+  return Math.max(0.18, 0.36 + (tier - 1) * 0.055);
 }
 
-export function doubleVal(value, max) {
-  const next = toVal(value) * 2n;
-  if (max == null) return next;
-  return next > max ? max : next;
+export function doubleVal(value, _max) {
+  return toVal(value) + 1n;
 }
 
-export function halfVal(value) {
-  const v = toVal(value) / 2n;
-  return v < 2n ? 2n : v;
+export function halfVal(value, floor = 1n) {
+  const next = toVal(value) - 1n;
+  const f = toVal(floor);
+  return next < f ? f : next;
 }
 
 export function formatValue(value) {
-  const s = toVal(value).toString();
-  return s.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  return shortValue(value);
 }
 
 const COMPACT_UNITS = [
@@ -61,18 +72,27 @@ const COMPACT_UNITS = [
 ];
 
 export function shortValue(value) {
-  const v = toVal(value);
-  if (v < 10000n) return v.toString();
-  const tier = tierOf(v);
-  if (tier >= 40) return `2^${tier}`;
+  const e = toVal(value);
+  if (e === 0n) return "1";
+  if (e < 0n) {
+    const n = Number(e);
+    if (n >= -8) {
+      const s = (2 ** n).toPrecision(n <= -5 ? 3 : 6);
+      return String(Number(s));
+    }
+    return `2^${e}`;
+  }
+  if (e < 14n) return (2n ** e).toString();
+  if (e >= 40n) return `2^${e}`;
+  const mag = 2n ** e;
   for (const [scale, suffix] of COMPACT_UNITS) {
-    if (v >= scale) {
-      const n = v / scale;
-      if (n >= 10000n) return `2^${tier}`;
+    if (mag >= scale) {
+      const n = mag / scale;
+      if (n >= 10000n) return `2^${e}`;
       return `${n}${suffix}`;
     }
   }
-  return `2^${tier}`;
+  return `2^${e}`;
 }
 
 export function padLabel(value) {
@@ -93,6 +113,11 @@ function lum(hex) {
 
 export function padColor(value) {
   const tier = tierOf(value);
+  if (tier < 1) {
+    const t = Math.max(0, 8 + tier);
+    const ice = 0x6ec8ff - t * 0x081018;
+    return ice > 0 ? ice : 0x3a6aa8;
+  }
   if (tier >= 1 && tier <= TIER_HEX.length) return TIER_HEX[tier - 1];
   const h = (tier * 0.173) % 1;
   const s = 0.78;

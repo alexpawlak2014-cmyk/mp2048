@@ -8,16 +8,14 @@ import { Sfx } from "./audio.js";
 import { LEVEL_COUNT, getLevel, levelName } from "./levels.js";
 import {
   MAX_2048,
-  MAX_INF,
-  MAX_SUPER,
-  SUPER_LABEL,
+  FLOOR_HALF,
   radiusFor,
   toVal,
   tierOf,
+  magTier,
   fromTier,
   doubleVal,
   halfVal,
-  formatValue,
   shortValue,
   padLabel,
   padColor,
@@ -26,6 +24,7 @@ import {
 } from "./values.js";
 import {
   UPGRADE_LIST,
+  upgradeCost,
   loadStars,
   saveStars,
   loadUpgrades,
@@ -38,17 +37,28 @@ const BEST_KEY = "ball-run-2048-best";
 const UNLOCK_KEY = "ball-run-2048-unlocked";
 const SANDBOX_KEY = "ball-run-2048-sandbox-tier";
 const SANDBOX_MAP_KEY = "ball-run-2048-sandbox-map";
+const CUSTOM_KEY = "mp2048-custom-cap";
+const SANDBOX_CEIL_KEY = "mp2048-sandbox-ceil";
 function parseSandboxTier(raw) {
   const digits = String(raw ?? "").replace(/[^\d]/g, "");
   if (!digits) return 1n;
   const s = digits.replace(/^0+/, "") || "0";
   if (s === "0") return 1n;
   try {
-    return BigInt(s);
+    const n = BigInt(s);
+    if (n > 4096n) return 4096n;
+    return n < 1n ? 1n : n;
   } catch {
     return 1n;
   }
 }
+
+function expLabel(n) {
+  const e = toVal(n);
+  return e >= 40n ? `2^${e}` : shortValue(fromTier(e));
+}
+
+const SANDBOX_MAPS = ["2048", "inf", "super", "endless", "custom", "half", "halfinf"];
 
 function toBigTier(v, fallback = 1n) {
   try {
@@ -65,7 +75,17 @@ function toBigTier(v, fallback = 1n) {
 
 function readSandboxMap() {
   const v = localStorage.getItem(SANDBOX_MAP_KEY);
-  if (v === "2048" || v === "inf" || v === "super" || v === "endless") return v;
+  if (
+    v === "2048" ||
+    v === "inf" ||
+    v === "super" ||
+    v === "endless" ||
+    v === "custom" ||
+    v === "half" ||
+    v === "halfinf"
+  ) {
+    return v;
+  }
   return "inf";
 }
 const SPHERE = new THREE.SphereGeometry(1, 16, 12);
@@ -122,9 +142,14 @@ export class MP2048 {
     this.superMode = false;
     this.endless = false;
     this.sandbox = false;
+    this.custom = false;
+    this.half = false;
+    this.halfInf = false;
     this.mode = "2048";
     this.sandboxTier = parseSandboxTier(localStorage.getItem(SANDBOX_KEY) || "1");
     this.sandboxMap = readSandboxMap();
+    this.customCap = parseSandboxTier(localStorage.getItem(CUSTOM_KEY) || "11");
+    this.sandboxCeil = parseSandboxTier(localStorage.getItem(SANDBOX_CEIL_KEY) || "11");
     this.maxValue = MAX_2048;
     this.shake = 0;
     this.fovPunch = 0;
@@ -201,10 +226,23 @@ export class MP2048 {
       modeInf: document.querySelector("#mode-inf"),
       modeSuper: document.querySelector("#mode-super"),
       modeEndless: document.querySelector("#mode-endless"),
+      modeCustom: document.querySelector("#mode-custom"),
+      modeHalf: document.querySelector("#mode-half"),
+      modeHalfInf: document.querySelector("#mode-halfinf"),
       modeSandbox: document.querySelector("#mode-sandbox"),
       sandboxPanel: document.querySelector("#sandbox-panel"),
       sandboxSize: document.querySelector("#sandbox-size"),
       sandboxLabel: document.querySelector("#sandbox-label"),
+      customPanel: document.querySelector("#custom-panel"),
+      customSize: document.querySelector("#custom-size"),
+      customLabel: document.querySelector("#custom-label"),
+      customMinus: document.querySelector("#custom-minus"),
+      customPlus: document.querySelector("#custom-plus"),
+      sandboxCeilWrap: document.querySelector("#sandbox-ceil-wrap"),
+      sandboxCeilSize: document.querySelector("#sandbox-ceil-size"),
+      sandboxCeilLabel: document.querySelector("#sandbox-ceil-label"),
+      sandboxCeilMinus: document.querySelector("#sandbox-ceil-minus"),
+      sandboxCeilPlus: document.querySelector("#sandbox-ceil-plus"),
       statMerges: document.querySelector("#stat-merges"),
       statBuffs: document.querySelector("#stat-buffs"),
       fever: document.querySelector("#fever"),
@@ -214,6 +252,9 @@ export class MP2048 {
       smapInf: document.querySelector("#smap-inf"),
       smapSuper: document.querySelector("#smap-super"),
       smapEndless: document.querySelector("#smap-endless"),
+      smapCustom: document.querySelector("#smap-custom"),
+      smapHalf: document.querySelector("#smap-half"),
+      smapHalfInf: document.querySelector("#smap-halfinf"),
       blurb: document.querySelector(".blurb"),
       pauseBtn: document.querySelector("#pause-btn"),
       starHud: document.querySelector("#star-hud"),
@@ -247,6 +288,9 @@ export class MP2048 {
     if (this.sandbox) return `${BEST_KEY}-sandbox`;
     if (this.endless) return `${BEST_KEY}-endless`;
     if (this.superMode) return `${BEST_KEY}-super`;
+    if (this.halfInf) return `${BEST_KEY}-halfinf`;
+    if (this.half) return `${BEST_KEY}-half`;
+    if (this.custom) return `${BEST_KEY}-custom`;
     if (this.infinity) return `${BEST_KEY}-inf`;
     return BEST_KEY;
   }
@@ -255,8 +299,16 @@ export class MP2048 {
     if (this.sandbox) return this.sandboxMap;
     if (this.endless) return "endless";
     if (this.superMode) return "super";
+    if (this.halfInf) return "halfinf";
+    if (this.half) return "half";
+    if (this.custom) return "custom";
     if (this.infinity) return "inf";
     return "2048";
+  }
+
+  isHalfKind() {
+    const k = this.mapKind();
+    return k === "half" || k === "halfinf";
   }
 
   heavyFx() {
@@ -265,27 +317,43 @@ export class MP2048 {
   }
 
   infLook() {
-    return this.mapKind() !== "2048";
+    const k = this.mapKind();
+    return k === "inf" || k === "halfinf";
   }
 
-  canGrow(value) {
-    return this.maxValue == null || toVal(value) < this.maxValue;
+  canGrow(_value) {
+    return true;
   }
 
   startValue() {
     if (this.sandbox) return fromTier(this.sandboxTier);
+    if (this.half || this.halfInf) return 1n;
     return fromTier(1 + this.up("start"));
   }
 
+  floorExp() {
+    return this.isHalfKind() ? FLOOR_HALF : 1n;
+  }
+
   capTier() {
-    const bump = this.up("start");
-    if (this.superMode) return 128 + bump;
-    if (this.infinity) return 63 + bump;
-    return 11 + bump;
+    const start = this.startValue();
+    const k = this.mapKind();
+    if (k === "custom") {
+      const cap = this.sandbox ? this.sandboxCeil : this.customCap;
+      return cap < start ? start : cap;
+    }
+    if (k === "half") return start + 10n;
+    if (k === "halfinf") return start + 62n;
+    if (k === "super") return start + 127n;
+    if (k === "inf") return start + 62n;
+    if (k === "endless") return start + 1024n;
+    return start + 10n;
   }
 
   modeMax() {
-    if (this.sandbox || this.endless) return null;
+    const k = this.mapKind();
+    if (k === "endless") return null;
+    if (this.sandbox && k !== "custom" && k !== "half" && k !== "halfinf") return null;
     return fromTier(this.capTier());
   }
 
@@ -394,13 +462,13 @@ export class MP2048 {
     this.refreshWallet();
     for (const u of UPGRADE_LIST) {
       const lv = this.up(u.id);
-      const maxed = lv >= u.max;
-      const cost = maxed ? 0 : u.costs[lv];
+      const maxed = u.max != null && lv >= u.max;
+      const cost = maxed ? 0 : upgradeCost(u, lv);
       let desc = u.desc;
       if (u.id === "start") {
         const now = shortValue(fromTier(1 + lv));
         const next = shortValue(fromTier(2 + lv));
-        desc = maxed ? `You start as ${now}.` : lv === 0 ? "Start as 4 instead of 2." : `Now ${now}. Next start: ${next}.`;
+        desc = lv === 0 ? "Start as 4 instead of 2." : `Now ${now}. Next start: ${next}.`;
       }
       const row = document.createElement("div");
       row.className = "shop-row";
@@ -410,7 +478,8 @@ export class MP2048 {
       btn.disabled = maxed || this.wallet < cost;
       btn.textContent = maxed ? "MAX" : `★ ${cost}`;
       const info = document.createElement("div");
-      info.innerHTML = `<strong>${u.name}</strong><small>Lv ${lv}/${u.max} · ${desc}</small>`;
+      const lvLabel = u.max == null ? `Lv ${lv}` : `Lv ${lv}/${u.max}`;
+      info.innerHTML = `<strong>${u.name}</strong><small>${lvLabel} · ${desc}</small>`;
       row.append(info, btn);
       root.appendChild(row);
     }
@@ -420,8 +489,8 @@ export class MP2048 {
     const u = UPGRADE_LIST.find((x) => x.id === id);
     if (!u) return;
     const lv = this.up(id);
-    if (lv >= u.max) return;
-    const cost = u.costs[lv];
+    if (u.max != null && lv >= u.max) return;
+    const cost = upgradeCost(u, lv);
     if (this.wallet < cost) return;
     this.wallet -= cost;
     this.upgrades[id] = lv + 1;
@@ -454,26 +523,34 @@ export class MP2048 {
   }
 
   levelOpts() {
-    const start = 1n + BigInt(this.up("start"));
-    if (this.sandbox) {
-      const min = this.sandboxTier;
-      const kind = this.sandboxMap;
-      if (kind === "2048") return { minTier: min, climb: 0, topTier: min + 10n };
-      if (kind === "inf") return { minTier: min, climb: 62, topTier: min + 62n };
-      if (kind === "super") return { minTier: min, climb: 127, topTier: min + 127n };
-      return { endless: true, minTier: min, climb: 256, topTier: min + 1024n };
+    const start = this.startValue();
+    const k = this.mapKind();
+    const spikeMul = k === "half" || k === "halfinf" ? 1.5 : 1;
+    if (k === "custom") {
+      let cap = this.sandbox ? this.sandboxCeil : this.customCap;
+      if (cap < start) cap = start;
+      const span = cap - start;
+      const spanN = span > 1000000n ? 1000000 : Number(span);
+      const climb = spanN > 12 ? spanN : 0;
+      return { minTier: start, climb, topTier: cap, spikeMul };
     }
-    if (this.endless) return { endless: true, minTier: start, climb: 256, topTier: start + 1024n };
-    if (this.superMode) return { minTier: start, climb: 127, topTier: start + 127n };
-    if (this.infinity) return { minTier: start, climb: 62, topTier: start + 62n };
-    return { minTier: start, topTier: start + 10n };
+    if (k === "half") return { minTier: start, topTier: start + 10n, spikeMul };
+    if (k === "halfinf") return { minTier: start, climb: 62, topTier: start + 62n, spikeMul };
+    if (k === "2048") return { minTier: start, topTier: start + 10n, spikeMul };
+    if (k === "inf") return { minTier: start, climb: 62, topTier: start + 62n, spikeMul };
+    if (k === "super") return { minTier: start, climb: 127, topTier: start + 127n, spikeMul };
+    return { endless: true, minTier: start, climb: 256, topTier: start + 1024n, spikeMul };
   }
 
   loadBest() {
     try {
-      return BigInt(localStorage.getItem(this.bestKey()) || "0");
+      const eRaw = localStorage.getItem(`${this.bestKey()}-e`);
+      if (eRaw != null && eRaw !== "") return BigInt(eRaw);
+      const old = localStorage.getItem(this.bestKey());
+      if (old == null || old === "" || old === "0") return null;
+      return BigInt(magTier(BigInt(old)));
     } catch {
-      return 0n;
+      return null;
     }
   }
 
@@ -489,7 +566,9 @@ export class MP2048 {
     this.buildLevelGrid();
     this.bind();
     this.updateSandboxLabel();
+    this.updateCustomLabel();
     this.syncSandboxMapButtons();
+    this.applyModeChrome();
     this.refreshBest();
     this.applySettings();
     this.refreshWallet();
@@ -712,8 +791,15 @@ export class MP2048 {
 
   loadLevel(index, spawnPickups = true) {
     this.levelIndex = index;
+    const opts = this.levelOpts();
     const kind = this.mapKind();
-    this.level = getLevel(index, kind !== "2048", kind === "super", this.levelOpts());
+    const infTrack =
+      kind === "inf" ||
+      kind === "super" ||
+      kind === "endless" ||
+      kind === "halfinf" ||
+      (kind === "custom" && (opts.climb || 0) > 12);
+    this.level = getLevel(index, infTrack, kind === "super" || kind === "endless", opts);
     this.segments = this.level.segments;
     this.goalZ = this.level.goalZ;
     this.buildTrack();
@@ -731,7 +817,15 @@ export class MP2048 {
       new THREE.MeshStandardMaterial({ color: 0xf0e2d0, roughness: 0.5, metalness: 0.02 }),
       new THREE.MeshStandardMaterial({ color: 0xe5d0b4, roughness: 0.5, metalness: 0.02 }),
     ];
-    const neon = this.heavyFx() ? 0xb14bff : this.infLook() ? 0xff5ad6 : 0xff7a3a;
+    const neon = this.heavyFx()
+      ? 0xb14bff
+      : this.isHalfKind()
+        ? 0x5ad8ff
+        : this.mapKind() === "custom"
+          ? 0xffc44a
+          : this.infLook()
+            ? 0xff5ad6
+            : 0xff7a3a;
     const railMat = new THREE.MeshStandardMaterial({
       color: neon,
       roughness: 0.32,
@@ -841,9 +935,13 @@ export class MP2048 {
     const superMode = this.heavyFx();
     const colors = superMode
       ? [0xff4fd8, 0x7c5cff, 0x3ee0ff, 0xffe14a]
-      : this.mapKind() === "inf"
-        ? [0xff7ad9, 0xff9a3b, 0x7c5cff, 0x3ee0ff]
-        : [0xf2b179, 0xf67c5f, 0xedcf72, 0x7ec7a0, 0x7c5cff];
+      : this.isHalfKind()
+        ? [0x7ee8ff, 0x5ad8ff, 0xb8f0ff, 0x3aa8d8]
+        : this.mapKind() === "custom"
+          ? [0xffe14a, 0xffc44a, 0xff9a3b, 0xffd98a]
+          : this.mapKind() === "inf"
+            ? [0xff7ad9, 0xff9a3b, 0x7c5cff, 0x3ee0ff]
+            : [0xf2b179, 0xf67c5f, 0xedcf72, 0x7ec7a0, 0x7c5cff];
     const step = this.goalZ > 800 ? 36 : 22;
     const count = Math.min(18, Math.floor(this.goalZ / step));
     const geos = [];
@@ -884,17 +982,18 @@ export class MP2048 {
   }
 
   buildPlayer() {
+    const start = this.startValue();
     this.player = {
-      value: 2n,
+      value: start,
       x: 0,
-      y: radiusFor(2),
+      y: radiusFor(start),
       z: 0,
       vx: 0,
       vy: 0,
-      r: radiusFor(2),
+      r: radiusFor(start),
       spin: 0,
     };
-    this.player.mat = this.ballMaterial(2);
+    this.player.mat = this.ballMaterial(start);
     this.player.mesh = new THREE.Mesh(SPHERE, this.player.mat);
     this.player.mesh.castShadow = true;
     this.player.mesh.scale.setScalar(this.player.r);
@@ -1188,13 +1287,23 @@ export class MP2048 {
     this.els.modeInf.addEventListener("click", () => this.setMode("inf"));
     this.els.modeSuper.addEventListener("click", () => this.setMode("super"));
     this.els.modeEndless?.addEventListener("click", () => this.setMode("endless"));
+    this.els.modeCustom?.addEventListener("click", () => this.setMode("custom"));
+    this.els.modeHalf?.addEventListener("click", () => this.setMode("half"));
+    this.els.modeHalfInf?.addEventListener("click", () => this.setMode("halfinf"));
     this.els.modeSandbox?.addEventListener("click", () => this.setMode("sandbox"));
     this.els.smap2048?.addEventListener("click", () => this.setSandboxMap("2048"));
     this.els.smapInf?.addEventListener("click", () => this.setSandboxMap("inf"));
     this.els.smapSuper?.addEventListener("click", () => this.setSandboxMap("super"));
     this.els.smapEndless?.addEventListener("click", () => this.setSandboxMap("endless"));
+    this.els.smapCustom?.addEventListener("click", () => this.setSandboxMap("custom"));
+    this.els.smapHalf?.addEventListener("click", () => this.setSandboxMap("half"));
+    this.els.smapHalfInf?.addEventListener("click", () => this.setSandboxMap("halfinf"));
     this.els.sandboxMinus?.addEventListener("click", () => this.setSandboxTier(this.sandboxTier - 1n));
     this.els.sandboxPlus?.addEventListener("click", () => this.setSandboxTier(this.sandboxTier + 1n));
+    this.els.customMinus?.addEventListener("click", () => this.setCustomCap(this.customCap - 1n));
+    this.els.customPlus?.addEventListener("click", () => this.setCustomCap(this.customCap + 1n));
+    this.els.sandboxCeilMinus?.addEventListener("click", () => this.setSandboxCeil(this.sandboxCeil - 1n));
+    this.els.sandboxCeilPlus?.addEventListener("click", () => this.setSandboxCeil(this.sandboxCeil + 1n));
     if (this.els.sandboxSize) {
       this.els.sandboxSize.value = String(this.sandboxTier);
       const commitSize = () => this.setSandboxTier(parseSandboxTier(this.els.sandboxSize.value));
@@ -1211,6 +1320,41 @@ export class MP2048 {
         if (e.code === "Enter") {
           e.preventDefault();
           commitSize();
+        }
+        e.stopPropagation();
+      });
+    }
+    if (this.els.customSize) {
+      this.els.customSize.value = String(this.customCap);
+      const commitCap = () => this.setCustomCap(parseSandboxTier(this.els.customSize.value));
+      this.els.customSize.addEventListener("input", () => {
+        this.setCustomCap(parseSandboxTier(this.els.customSize.value), { reload: false, syncInput: false });
+      });
+      this.els.customSize.addEventListener("change", commitCap);
+      this.els.customSize.addEventListener("blur", commitCap);
+      this.els.customSize.addEventListener("keydown", (e) => {
+        if (e.code === "Enter") {
+          e.preventDefault();
+          commitCap();
+        }
+        e.stopPropagation();
+      });
+    }
+    if (this.els.sandboxCeilSize) {
+      this.els.sandboxCeilSize.value = String(this.sandboxCeil);
+      const commitCeil = () => this.setSandboxCeil(parseSandboxTier(this.els.sandboxCeilSize.value));
+      this.els.sandboxCeilSize.addEventListener("input", () => {
+        this.setSandboxCeil(parseSandboxTier(this.els.sandboxCeilSize.value), {
+          reload: false,
+          syncInput: false,
+        });
+      });
+      this.els.sandboxCeilSize.addEventListener("change", commitCeil);
+      this.els.sandboxCeilSize.addEventListener("blur", commitCeil);
+      this.els.sandboxCeilSize.addEventListener("keydown", (e) => {
+        if (e.code === "Enter") {
+          e.preventDefault();
+          commitCeil();
         }
         e.stopPropagation();
       });
@@ -1268,7 +1412,7 @@ export class MP2048 {
   }
 
   refreshBest() {
-    const label = this.best > 0n ? shortValue(this.best) : "0";
+    const label = this.best == null ? "0" : shortValue(this.best);
     this.els.bestTitle.textContent = `BEST ${label}`;
     this.els.bestHud.textContent = `BEST ${label}`;
   }
@@ -1276,8 +1420,16 @@ export class MP2048 {
   updateSandboxLabel() {
     if (!this.els.sandboxLabel) return;
     const n = this.sandboxTier;
-    const shown = n >= 40n ? `2^${n}` : shortValue(fromTier(n));
-    this.els.sandboxLabel.textContent = `SIZE ${n} = ${shown}`;
+    this.els.sandboxLabel.textContent = `SIZE ${n} = ${expLabel(n)}`;
+  }
+
+  updateCustomLabel() {
+    if (this.els.customLabel) {
+      this.els.customLabel.textContent = `CEILING ${this.customCap} = ${expLabel(this.customCap)}`;
+    }
+    if (this.els.sandboxCeilLabel) {
+      this.els.sandboxCeilLabel.textContent = `CEILING ${this.sandboxCeil} = ${expLabel(this.sandboxCeil)}`;
+    }
   }
 
   syncSandboxMapButtons() {
@@ -1286,6 +1438,10 @@ export class MP2048 {
     this.els.smapInf?.classList.toggle("on", kind === "inf");
     this.els.smapSuper?.classList.toggle("on", kind === "super");
     this.els.smapEndless?.classList.toggle("on", kind === "endless");
+    this.els.smapCustom?.classList.toggle("on", kind === "custom");
+    this.els.smapHalf?.classList.toggle("on", kind === "half");
+    this.els.smapHalfInf?.classList.toggle("on", kind === "halfinf");
+    this.els.sandboxCeilWrap?.classList.toggle("hidden", kind !== "custom");
   }
 
   setSandboxTier(n, { reload = true, syncInput = true, preview = true } = {}) {
@@ -1294,8 +1450,7 @@ export class MP2048 {
     if (syncInput && this.els.sandboxSize) this.els.sandboxSize.value = String(this.sandboxTier);
     this.updateSandboxLabel();
     if (this.sandbox) {
-      const shown = this.sandboxTier >= 40n ? `2^${this.sandboxTier}` : shortValue(fromTier(this.sandboxTier));
-      this.els.blurb.textContent = `Any map, your size. 1=2, 2=4, 3=8. Starting at ${shown} on ${this.sandboxMapLabel()}.`;
+      this.els.blurb.textContent = `Any map, your size. 1=2, 2=4, 3=8. Starting at ${expLabel(this.sandboxTier)} on ${this.sandboxMapLabel()}.`;
       if (preview && this.state === "title") {
         this.resetPlayerPose();
         if (reload) this.loadLevel(this.levelIndex, false);
@@ -1303,21 +1458,51 @@ export class MP2048 {
     }
   }
 
+  setCustomCap(n, { reload = true, syncInput = true } = {}) {
+    this.customCap = parseSandboxTier(n);
+    localStorage.setItem(CUSTOM_KEY, String(this.customCap));
+    if (syncInput && this.els.customSize) this.els.customSize.value = String(this.customCap);
+    this.updateCustomLabel();
+    this.syncCap();
+    if (this.custom && this.state === "title") {
+      this.applyModeChrome();
+      this.resetPlayerPose();
+      if (reload) this.loadLevel(this.levelIndex, false);
+    }
+  }
+
+  setSandboxCeil(n, { reload = true, syncInput = true } = {}) {
+    this.sandboxCeil = parseSandboxTier(n);
+    localStorage.setItem(SANDBOX_CEIL_KEY, String(this.sandboxCeil));
+    if (syncInput && this.els.sandboxCeilSize) this.els.sandboxCeilSize.value = String(this.sandboxCeil);
+    this.updateCustomLabel();
+    this.syncCap();
+    if (this.sandbox && this.sandboxMap === "custom" && this.state === "title") {
+      this.applyModeChrome();
+      this.resetPlayerPose();
+      if (reload) this.loadLevel(this.levelIndex, false);
+    }
+  }
+
   sandboxMapLabel() {
-    return this.sandboxMap === "endless"
-      ? "∞∞"
-      : this.sandboxMap === "super"
-        ? "Super ∞"
-        : this.sandboxMap === "inf"
-          ? "Infinity"
-          : "2048";
+    const labels = {
+      endless: "∞∞",
+      super: "Super ∞",
+      inf: "Infinity",
+      custom: "Custom",
+      half: "Half",
+      halfinf: "Half ∞",
+      2048: "2048",
+    };
+    return labels[this.sandboxMap] || "2048";
   }
 
   setSandboxMap(kind) {
-    this.sandboxMap = kind === "2048" || kind === "inf" || kind === "super" || kind === "endless" ? kind : "inf";
+    this.sandboxMap = SANDBOX_MAPS.includes(kind) ? kind : "inf";
     localStorage.setItem(SANDBOX_MAP_KEY, this.sandboxMap);
     this.syncSandboxMapButtons();
     if (!this.sandbox) return;
+    this.syncCap();
     this.applyModeChrome();
     this.texCache.clear();
     this.matCache.clear();
@@ -1334,35 +1519,48 @@ export class MP2048 {
     this.els.modeInf.classList.toggle("on", mode === "inf");
     this.els.modeSuper.classList.toggle("on", mode === "super");
     this.els.modeEndless?.classList.toggle("on", mode === "endless");
+    this.els.modeCustom?.classList.toggle("on", mode === "custom");
+    this.els.modeHalf?.classList.toggle("on", mode === "half");
+    this.els.modeHalfInf?.classList.toggle("on", mode === "halfinf");
     this.els.modeSandbox?.classList.toggle("on", mode === "sandbox");
     this.els.sandboxPanel?.classList.toggle("hidden", mode !== "sandbox");
+    this.els.customPanel?.classList.toggle("hidden", mode !== "custom");
     this.syncSandboxMapButtons();
     document.body.classList.toggle("super-mode", kind === "super" || kind === "endless");
     document.body.classList.toggle("inf-mode", kind === "inf");
     document.body.classList.toggle("endless-mode", kind === "endless");
+    document.body.classList.toggle("half-mode", kind === "half" || kind === "halfinf");
+    document.body.classList.toggle("halfinf-mode", kind === "halfinf");
+    document.body.classList.toggle("custom-mode", kind === "custom");
     this.updateSandboxLabel();
-    if (this.els.kicker) {
-      this.els.kicker.textContent =
-        mode === "endless"
-          ? "no ceiling  ·  keep going"
-          : mode === "sandbox"
-            ? "any map  ·  any size"
-            : mode === "super"
-              ? "2¹²⁸  ·  neon integer"
-              : mode === "inf"
-                ? "no cap  ·  keep merging"
-                : "merge · dodge · roll";
-    }
+    this.updateCustomLabel();
+    const kickers = {
+      endless: "no ceiling  ·  keep going",
+      sandbox: "any map  ·  any size",
+      super: "2¹²⁸  ·  neon integer",
+      inf: "no cap  ·  keep merging",
+      custom: "your ceiling  ·  your run",
+      half: "split to dust  ·  2⁻³¹",
+      halfinf: "half forever  ·  ice ∞",
+    };
+    if (this.els.kicker) this.els.kicker.textContent = kickers[mode] || "merge · dodge · roll";
+    const cap = this.modeMax();
     this.els.blurb.textContent =
       mode === "endless"
         ? "Merges never cap. Balls climb toward 2^1024 and past it. Infinity is the point."
         : mode === "sandbox"
-          ? `Any map, your size. 1=2, 2=4, 3=8. Starting at ${this.sandboxTier >= 40n ? `2^${this.sandboxTier}` : shortValue(fromTier(this.sandboxTier))} on ${this.sandboxMapLabel()}.`
-            : mode === "super"
-              ? `No ceiling but ${shortValue(this.modeMax())}. Climb to 2^${this.capTier()}.`
-              : mode === "inf"
-                ? `Same merge run, no 2048 cap. Climb all the way to ${shortValue(this.modeMax())}.`
-                : `Steer into matching numbers to grow. Spikes cut you in half. Fall off the rail and you start over. Can you make ${shortValue(this.modeMax())}?`;
+          ? `Any map, your size. 1=2, 2=4, 3=8. Starting at ${expLabel(this.sandboxTier)} on ${this.sandboxMapLabel()}.`
+          : mode === "super"
+            ? `No ceiling but ${shortValue(cap)}. Climb to 2^${this.capTier()}.`
+            : mode === "inf"
+              ? `Same merge run, no 2048 cap. Climb all the way to ${shortValue(cap)}.`
+              : mode === "custom"
+                ? `Pick the rainbow. Ceiling is ${expLabel(this.customCap)}. Rainbows still merge.`
+                : mode === "half"
+                  ? "Classic 2048, but spikes are 1.5× denser. Start at 2. Halve to 1, 0.5, … down to 2^-31."
+                  : mode === "halfinf"
+                    ? "Half rules, Infinity climb. Start at 2, split to 2^-31, merge toward 2^63."
+                    : `Steer into matching numbers to grow. Spikes cut you in half. Fall off the rail and you start over. Can you make ${shortValue(cap)}?`;
   }
 
   setMode(mode) {
@@ -1370,7 +1568,10 @@ export class MP2048 {
     this.superMode = mode === "super";
     this.endless = mode === "endless";
     this.sandbox = mode === "sandbox";
-    this.infinity = mode !== "2048";
+    this.custom = mode === "custom";
+    this.half = mode === "half";
+    this.halfInf = mode === "halfinf";
+    this.infinity = mode === "inf";
     this.syncCap();
     this.best = this.loadBest();
     this.refreshBest();
@@ -1391,9 +1592,15 @@ export class MP2048 {
         ? "∞∞ "
         : kind === "super"
           ? "✦ "
-          : kind === "inf"
-            ? "∞ "
-            : "";
+          : kind === "halfinf"
+            ? "½∞ "
+            : kind === "half"
+              ? "½ "
+              : kind === "custom"
+                ? "★ "
+                : kind === "inf"
+                  ? "∞ "
+                  : "";
     this.els.levelHud.textContent = `${tag}${this.level.id}  ${this.level.name}`;
   }
 
@@ -1482,13 +1689,16 @@ export class MP2048 {
 
   setPlayLook() {
     const superSky = this.heavyFx();
-    const inf = this.mapKind() === "inf";
+    const kind = this.mapKind();
+    const inf = kind === "inf";
+    const half = kind === "half" || kind === "halfinf";
+    const custom = kind === "custom";
     this.ground.visible = true;
     this.ocean.visible = false;
-    if (this.stars) this.stars.visible = superSky || inf;
-    const top = superSky ? 0x0e0318 : inf ? 0x2a0e48 : 0x4aa0d8;
-    const bot = superSky ? 0x2a0c48 : inf ? 0xc45a3a : 0xe8c898;
-    const fog = superSky ? 0x14061f : inf ? 0xb86850 : 0x86c0e4;
+    if (this.stars) this.stars.visible = superSky || inf || kind === "halfinf" || custom;
+    const top = superSky ? 0x0e0318 : half ? 0x7ec8ff : custom ? 0xf6c84a : inf ? 0x2a0e48 : 0x4aa0d8;
+    const bot = superSky ? 0x2a0c48 : half ? 0xe8f6ff : custom ? 0xfff3c4 : inf ? 0xc45a3a : 0xe8c898;
+    const fog = superSky ? 0x14061f : half ? 0xb8e4ff : custom ? 0xf0d080 : inf ? 0xb86850 : 0x86c0e4;
     this.scene.background = new THREE.Color(fog);
     this.scene.fog = new THREE.Fog(fog, 32, superSky ? 150 : 110);
     if (this.skyMat) {
@@ -1497,16 +1707,18 @@ export class MP2048 {
     }
     this.renderer.toneMappingExposure = superSky ? 0.98 : inf ? 0.9 : 0.88;
     if (this.bloomPass) {
-      this.bloomPass.strength = superSky ? 0.36 : inf ? 0.26 : 0.18;
+      this.bloomPass.strength = superSky ? 0.36 : inf ? 0.26 : half ? 0.22 : custom ? 0.24 : 0.18;
       this.bloomPass.threshold = 0.84;
     }
     if (this.rim) {
-      this.rim.color.setHex(superSky ? 0xc46bff : inf ? 0xff6ad6 : 0xffc48a);
+      this.rim.color.setHex(superSky ? 0xc46bff : half ? 0x8ee8ff : custom ? 0xffe08a : inf ? 0xff6ad6 : 0xffc48a);
       this.rim.intensity = superSky ? 0.32 : 0.16;
     }
     if (this.hemi) this.hemi.intensity = superSky ? 0.55 : 0.78;
     if (this.sun) this.sun.intensity = superSky ? 0.85 : 1.08;
-    this.ground.material.color.setHex(superSky ? 0x2a1840 : inf ? 0x4a9a72 : 0x6eb090);
+    this.ground.material.color.setHex(
+      superSky ? 0x2a1840 : half ? 0x8fd4c4 : custom ? 0xc4b070 : inf ? 0x4a9a72 : 0x6eb090
+    );
   }
 
   setWinLook() {
@@ -1737,13 +1949,11 @@ export class MP2048 {
   update(dt) {
     const p = this.player;
     this.invuln = Math.max(0, this.invuln - dt);
-    const t = tierOf(p.value);
+    const t = Math.max(0, tierOf(p.value));
     const kind = this.mapKind();
-    const speed = Math.min(
-      kind === "super" || kind === "endless" ? 32 : kind === "inf" ? 28 : 22,
-      (11.6 + Math.min(p.z, 260) * 0.014 + t * (kind === "super" || kind === "endless" ? 0.38 : kind === "inf" ? 0.48 : 0.2)) *
-        this.level.speed
-    ) * (this.boost > 0 ? 1.55 + this.up("boost") * 0.08 : 1) * (this.fever > 0 ? 1.12 : 1);
+    const capSpd = kind === "super" || kind === "endless" ? 32 : kind === "inf" || kind === "halfinf" ? 28 : 22;
+    const tierMul = kind === "super" || kind === "endless" ? 0.38 : kind === "inf" || kind === "halfinf" ? 0.48 : 0.2;
+    const speed = Math.min(capSpd, (11.6 + Math.min(p.z, 260) * 0.014 + t * tierMul) * this.level.speed) * (this.boost > 0 ? 1.55 + this.up("boost") * 0.08 : 1) * (this.fever > 0 ? 1.12 : 1);
     this.runSpeed = speed;
 
     if (this.state === "play") {
@@ -1958,7 +2168,11 @@ export class MP2048 {
     if (this.combo >= 5) this.sfx.sparkle(this.combo);
     this.toast(this.combo >= 8 ? `x${this.combo}  ${shortValue(next)}` : shortValue(next));
     if (navigator.vibrate) navigator.vibrate(18);
-    if (isRainbow(next, this.maxValue)) this.toast("RAINBOW!");
+    if (isRainbow(next, this.maxValue)) {
+      this.toast("RAINBOW!");
+      this.confetti(this.player.x, this.player.y, this.player.z);
+      this.fovPunch = Math.max(this.fovPunch, 10);
+    }
   }
 
   collideSpikes() {
@@ -2035,7 +2249,8 @@ export class MP2048 {
     }
     this.invuln = 0.7;
     const prev = this.player.value;
-    if (prev <= 2n) {
+    const floor = this.floorExp();
+    if (prev <= floor) {
       if (this.lives > 0) {
         this.lives -= 1;
         this.invuln = 1.1;
@@ -2055,8 +2270,8 @@ export class MP2048 {
       this.beginFall("spike");
       return;
     }
-    const next = halfVal(prev);
-    if (prev > 2n) {
+    const next = halfVal(prev, floor);
+    if (prev > floor) {
       const side = this.player.x >= 0 ? -1 : 1;
       this.spawnPickup(
         this.player.x + side * (this.player.r + radiusFor(next) + 0.12),
@@ -2169,7 +2384,7 @@ export class MP2048 {
   burst(x, y, z, value) {
     const pal = styleFor(value);
     const n = 8;
-    const power = 7 + Math.min(6, tierOf(value) * 0.06);
+    const power = 7 + Math.min(6, Math.max(0, tierOf(value)) * 0.06);
     let used = 0;
     for (const q of this.sparks) {
       if (used >= n) break;
@@ -2364,10 +2579,11 @@ export class MP2048 {
     const tileL = 7.4;
     const gap = 0.18;
     const startZ = this.goalZ + tileL * 0.55;
-    const playerTier = Math.max(1, tierOf(this.player.value));
+    const playerTier = tierOf(this.player.value);
     const uncapped = this.maxValue == null;
-    const last = uncapped ? playerTier : this.capTier();
-    let first = uncapped ? Math.max(1, last - 31) : 1;
+    const last = uncapped ? Math.max(playerTier, 1) : Number(this.capTier());
+    const floor = Number(this.floorExp());
+    let first = this.isHalfKind() ? Math.max(floor, Math.min(playerTier, last) - 20) : uncapped ? Math.max(1, last - 31) : 1;
     if (last - first + 1 > 36) first = last - 35;
     const stepY = this.heavyFx() ? 0.92 : 1.28;
 
@@ -2482,9 +2698,9 @@ export class MP2048 {
     if (this.state === "end") return;
     this.state = "end";
     const value = this.player.value;
-    if (value > this.best) {
+    if (this.best == null || value > this.best) {
       this.best = value;
-      localStorage.setItem(this.bestKey(), value.toString());
+      localStorage.setItem(`${this.bestKey()}-e`, value.toString());
       this.refreshBest();
     }
 
@@ -2514,6 +2730,19 @@ export class MP2048 {
       } else if (this.sandbox) {
         this.els.endTitle.textContent = "SANDBOX";
         this.els.endMsg.textContent = `Started at ${shortValue(this.startValue())}, finished at ${shortValue(value)}.`;
+      } else if (this.halfInf) {
+        this.els.endTitle.textContent = isRainbow(value, this.maxValue) ? "HALF ∞" : "NICE";
+        this.els.endMsg.textContent = `Icy climb. You rolled in as ${shortValue(value)}.`;
+      } else if (this.half) {
+        this.els.endTitle.textContent = isRainbow(value, this.maxValue) ? "HALF" : "NICE";
+        this.els.endMsg.textContent = isRainbow(value, this.maxValue)
+          ? `Rainbow from the frost. ${shortValue(value)}.`
+          : `You rolled in as ${shortValue(value)}. ${this.level.name} is done.`;
+      } else if (this.custom) {
+        this.els.endTitle.textContent = isRainbow(value, this.maxValue) ? "CUSTOM" : "NICE";
+        this.els.endMsg.textContent = isRainbow(value, this.maxValue)
+          ? `You hit your ceiling ${expLabel(this.customCap)}.`
+          : `You rolled in as ${shortValue(value)}. ${this.level.name} is done.`;
       } else {
         this.els.endTitle.textContent = isRainbow(value, this.maxValue)
           ? this.superMode
@@ -2533,7 +2762,9 @@ export class MP2048 {
     } else if (kind === "spike") {
       this.els.endKicker.textContent = this.level.name;
       this.els.endTitle.textContent = "OOPS";
-      this.els.endMsg.textContent = "You hit a spike at 2. That's the end of this run.";
+      this.els.endMsg.textContent = this.isHalfKind()
+        ? `You hit a spike at ${shortValue(this.floorExp())}. That's the floor of this run.`
+        : "You hit a spike at 2. That's the end of this run.";
     } else {
       this.els.endKicker.textContent = this.level.name;
       this.els.endTitle.textContent = "OOPS";

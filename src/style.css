@@ -289,11 +289,11 @@ body.boosting #scanlines {
   inset: -10%;
   pointer-events: none;
   z-index: 0;
-  opacity: 0.7;
+  opacity: 0.78;
   background:
-    radial-gradient(ellipse at 18% 8%, rgba(255, 90, 200, 0.42), transparent 46%),
-    radial-gradient(ellipse at 82% 12%, rgba(70, 190, 255, 0.38), transparent 44%),
-    radial-gradient(ellipse at 50% 100%, rgba(255, 190, 70, 0.28), transparent 50%);
+    radial-gradient(ellipse at 18% 8%, rgba(255, 90, 200, 0.48), transparent 46%),
+    radial-gradient(ellipse at 82% 12%, rgba(70, 190, 255, 0.42), transparent 44%),
+    radial-gradient(ellipse at 50% 100%, rgba(255, 190, 70, 0.32), transparent 50%);
   animation: auroraDrift 9s ease-in-out infinite alternate;
   mix-blend-mode: screen;
 }
@@ -394,7 +394,17 @@ h2 {
 .logo-name i:nth-child(6) {
   background: linear-gradient(135deg, #ff4fd8, #7c5cff, #3ee0ff, #ffe14a);
   box-shadow: 0 6px 0 rgba(0, 0, 0, 0.18), 0 0 22px rgba(255, 80, 220, 0.65);
-  animation-delay: 0.4s;
+  animation: tileFloat 2.4s ease-in-out infinite, rainbowSpin 3.6s linear infinite;
+  animation-delay: 0.4s, 0s;
+}
+
+@keyframes rainbowSpin {
+  0% {
+    filter: hue-rotate(0deg) brightness(1.05);
+  }
+  100% {
+    filter: hue-rotate(360deg) brightness(1.05);
+  }
 }
 
 @keyframes tileFloat {
@@ -464,13 +474,59 @@ button.mode.endless.on {
   animation: superPulse 1.6s ease-in-out infinite;
 }
 
-#sandbox-panel {
+button.mode.custom {
+  background: linear-gradient(135deg, #f0c040, #ff9a3b);
+  color: #2b1c10;
+  box-shadow: 0 5px 0 #c48a18, 0 0 16px rgba(255, 200, 70, 0.45);
+}
+
+button.mode.custom.on {
+  background: linear-gradient(135deg, #ffe14a, #ff9a3b, #ff5ad6);
+  color: #2b1c10;
+  box-shadow: 0 5px 0 #e08a20, 0 0 28px rgba(255, 210, 80, 0.8);
+  animation: superPulse 1.6s ease-in-out infinite;
+}
+
+button.mode.half {
+  background: linear-gradient(135deg, #7ee8ff, #3aa8d8);
+  color: #123048;
+  box-shadow: 0 5px 0 #2a7aaa, 0 0 16px rgba(90, 220, 255, 0.45);
+}
+
+button.mode.half.on {
+  background: linear-gradient(135deg, #e8f8ff, #5ad8ff, #7c5cff);
+  color: #123048;
+  box-shadow: 0 5px 0 #3aa8d8, 0 0 28px rgba(120, 230, 255, 0.75);
+  animation: superPulse 1.6s ease-in-out infinite;
+}
+
+button.mode.halfinf {
+  background: linear-gradient(135deg, #1a3a68, #5ad8ff);
+  color: #fff;
+  box-shadow: 0 5px 0 #163a70, 0 0 16px rgba(90, 180, 255, 0.5);
+}
+
+button.mode.halfinf.on {
+  background: linear-gradient(135deg, #5ad8ff, #7c5cff, #ffe14a);
+  color: #102030;
+  box-shadow: 0 5px 0 #3a6cff, 0 0 28px rgba(90, 220, 255, 0.8);
+  animation: superPulse 1.6s ease-in-out infinite;
+}
+
+.mode-row + .mode-row {
+  margin-top: -8px;
+}
+
+#sandbox-panel,
+#custom-panel {
   width: min(460px, 92vw);
   margin: 0 auto 16px;
   pointer-events: auto;
 }
 
-#sandbox-label {
+#sandbox-label,
+#custom-label,
+#sandbox-ceil-label {
   font-family: Fredoka, Nunito, sans-serif;
   font-weight: 700;
   font-size: 18px;
@@ -487,7 +543,9 @@ button.mode.endless.on {
   margin-bottom: 12px;
 }
 
-#sandbox-size {
+#sandbox-size,
+#custom-size,
+#sandbox-ceil-size {
   width: 140px;
   font-family: Fredoka, Nunito, sans-serif;
   font-size: 28px;
@@ -601,6 +659,18 @@ body.inf-mode {
   background: #ff8a62;
 }
 
+body.half-mode {
+  background: #8ec8ef;
+}
+
+body.halfinf-mode {
+  background: #3a6aa8;
+}
+
+body.custom-mode {
+  background: #f0c040;
+}
+
 body.super-mode #aurora {
   opacity: 0.95;
   background:
@@ -614,6 +684,20 @@ body.inf-mode #aurora {
     radial-gradient(ellipse at 20% 0%, rgba(255, 90, 160, 0.5), transparent 46%),
     radial-gradient(ellipse at 85% 10%, rgba(255, 160, 40, 0.42), transparent 44%),
     radial-gradient(ellipse at 50% 100%, rgba(120, 80, 255, 0.32), transparent 50%);
+}
+
+body.half-mode #aurora {
+  background:
+    radial-gradient(ellipse at 18% 0%, rgba(90, 220, 255, 0.58), transparent 46%),
+    radial-gradient(ellipse at 82% 14%, rgba(180, 240, 255, 0.5), transparent 44%),
+    radial-gradient(ellipse at 50% 100%, rgba(120, 90, 255, 0.28), transparent 50%);
+}
+
+body.custom-mode #aurora {
+  background:
+    radial-gradient(ellipse at 20% 0%, rgba(255, 210, 70, 0.62), transparent 46%),
+    radial-gradient(ellipse at 80% 12%, rgba(255, 90, 160, 0.38), transparent 44%),
+    radial-gradient(ellipse at 50% 100%, rgba(255, 140, 40, 0.4), transparent 50%);
 }
 
 body.super-mode #scanlines {

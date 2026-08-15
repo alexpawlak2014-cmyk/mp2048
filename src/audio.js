@@ -1,15 +1,16 @@
+function rateFromTier(tier, base, step) {
+  return base + Math.max(0, tier) * step;
+}
+
 function tierOfValue(value) {
   try {
     const v = typeof value === "bigint" ? value : BigInt(value);
-    if (v <= 1n) return 1;
-    return v.toString(2).length - 1;
+    if (v < 1n) return 1;
+    if (v > 400n) return 400;
+    return Number(v);
   } catch {
     return 1;
   }
-}
-
-function rateFromTier(tier, base, step) {
-  return base + Math.max(0, tier) * step;
 }
 
 export class Sfx {

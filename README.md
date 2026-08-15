@@ -31,4 +31,5 @@ Apple App Store submission needs an Apple Developer account, Xcode, signing, scr
 - **Spikes** cut your number in half. At **2**, a spike ends the run.
 - Fall off the rail and the run ends.
 - Grab shields, magnets, boosts, hearts, and stars. Spend stars on upgrades.
-- Modes: **2048**, **Infinity**, **Super ∞**, **∞∞**, and **Sandbox**.
+- Modes: **2048**, **Infinity**, **Super ∞**, **∞∞**, **Custom**, **Half**, **Half ∞**, and **Sandbox**.
+- **Custom** lets you pick the rainbow ceiling. **Half** starts at 2, has 1.5× spikes, and can split down to 2⁻³¹. **Half ∞** is Half with an Infinity climb. Rainbow balls keep merging. Bigger Ball has no rank cap.
