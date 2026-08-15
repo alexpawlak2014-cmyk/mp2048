@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 180 180">
+  <rect width="180" height="180" rx="40" fill="#f65e3b"/>
+  <rect x="22" y="22" width="136" height="136" rx="28" fill="#edcf72"/>
+  <text x="90" y="108" text-anchor="middle" font-family="Arial Black, sans-serif" font-size="42" font-weight="700" fill="#2b1c10">MP</text>
+  <text x="90" y="142" text-anchor="middle" font-family="Arial Black, sans-serif" font-size="22" font-weight="700" fill="#c44828">2048</text>
+</svg>

@@ -1,0 +1,24 @@
+{
+  "name": "MP2048",
+  "short_name": "MP2048",
+  "description": "Merge, dodge, and roll. Grow the rainbow ball.",
+  "start_url": "./",
+  "display": "fullscreen",
+  "orientation": "portrait",
+  "background_color": "#9fd8ff",
+  "theme_color": "#f65e3b",
+  "icons": [
+    {
+      "src": "./icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "./apple-touch-icon.png",
+      "sizes": "180x180",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}

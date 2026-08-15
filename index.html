@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"
+    />
+    <title>MP2048</title>
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="MP2048" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="theme-color" content="#f65e3b" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="icon" type="image/svg+xml" href="/icon.svg" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Fredoka:wght@500;600;700&family=Nunito:wght@700;800;900&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <canvas id="game"></canvas>
+
+    <div id="overlay">
+      <div id="hud" class="hidden">
+        <div id="badge">2</div>
+        <div class="hud-mid">
+          <div id="level-hud">1  First Roll</div>
+          <div id="stat-merges">0 MERGES</div>
+          <div id="stat-buffs"></div>
+        </div>
+        <div class="hud-right">
+          <button id="pause-btn" type="button" class="icon-btn">⚙</button>
+          <div id="best-hud">BEST 0</div>
+          <div id="star-hud">★ 0</div>
+        </div>
+      </div>
+
+      <div id="combo" class="hidden">x2</div>
+      <div id="fever" class="hidden">FEVER</div>
+      <div id="fx-flash"></div>
+      <div id="vignette"></div>
+      <div id="scanlines"></div>
+
+      <div id="toast"></div>
+
+      <div id="title-screen" class="panel">
+        <div id="aurora"></div>
+        <p class="kicker">merge · dodge · steal powerups</p>
+        <h1>
+          <span class="logo-name">
+            <i>M</i><i>P</i><i>2</i><i>0</i><i>4</i><i>8</i>
+          </span>
+        </h1>
+        <p class="blurb">
+          Steer into matching numbers to grow. Spikes cut you in half.
+          Fall off the rail and you start over. Can you make the rainbow ball?
+        </p>
+        <div class="mode-row">
+          <button id="mode-2048" type="button" class="mode on">2048</button>
+          <button id="mode-inf" type="button" class="mode">INFINITY</button>
+          <button id="mode-super" type="button" class="mode super">SUPER ∞</button>
+          <button id="mode-endless" type="button" class="mode endless">∞∞</button>
+          <button id="mode-sandbox" type="button" class="mode">SANDBOX</button>
+        </div>
+        <div id="sandbox-panel" class="hidden">
+          <p id="sandbox-label">SIZE 1 = 2</p>
+          <div class="sandbox-size-row">
+            <button id="sandbox-minus" type="button" class="sandbox-step">−</button>
+            <input id="sandbox-size" type="text" inputmode="numeric" autocomplete="off" value="1" />
+            <button id="sandbox-plus" type="button" class="sandbox-step">+</button>
+          </div>
+          <p class="sandbox-map-kicker">MAP</p>
+          <div class="mode-row sandbox-maps">
+            <button id="smap-2048" type="button" class="mode on">2048</button>
+            <button id="smap-inf" type="button" class="mode">INFINITY</button>
+            <button id="smap-super" type="button" class="mode super">SUPER ∞</button>
+            <button id="smap-endless" type="button" class="mode endless">∞∞</button>
+          </div>
+        </div>
+        <button id="play" type="button">PLAY</button>
+        <div class="menu-row">
+          <button id="upgrades-btn" type="button" class="ghost">UPGRADES</button>
+          <button id="settings-btn" type="button" class="ghost">SETTINGS</button>
+        </div>
+        <p id="star-wallet" class="star-line">★ 0</p>
+        <p id="best-title" class="best-line">BEST 0</p>
+        <p class="hint">Mouse / touch to steer · A D or arrows · Esc for pause</p>
+        <div id="level-grid"></div>
+      </div>
+
+      <div id="end-screen" class="panel hidden">
+        <p id="end-kicker" class="kicker">run over</p>
+        <h2 id="end-title">OOPS</h2>
+        <p id="end-number" class="end-number">2</p>
+        <p id="end-msg" class="blurb">You fell off the rail.</p>
+        <p id="end-stars" class="star-line">+0 ★</p>
+        <div class="end-actions">
+          <button id="retry" type="button">TRY AGAIN</button>
+          <button id="next" type="button" class="hidden">NEXT LEVEL</button>
+          <button id="end-upgrades" type="button" class="ghost">UPGRADES</button>
+          <button id="to-levels" type="button" class="ghost">LEVELS</button>
+        </div>
+      </div>
+
+      <div id="upgrades-screen" class="panel hidden">
+        <p class="kicker">spend stars · get stronger</p>
+        <h2>UPGRADES</h2>
+        <p id="shop-wallet" class="star-line">★ 0</p>
+        <div id="shop-list"></div>
+        <button id="shop-back" type="button" class="ghost">BACK</button>
+      </div>
+
+      <div id="settings-screen" class="panel hidden">
+        <p id="settings-kicker" class="kicker">tweak the run</p>
+        <h2>SETTINGS</h2>
+        <div class="set-list">
+          <div class="set-row">
+            <span>Sound</span>
+            <button id="set-sfx" type="button" class="toggle on">ON</button>
+          </div>
+          <div class="set-row">
+            <span>Volume</span>
+            <input id="set-volume" type="range" min="0" max="100" value="85" />
+          </div>
+          <div class="set-row">
+            <span>Quality</span>
+            <div class="mode-row tight">
+              <button id="qual-low" type="button" class="mode">LOW</button>
+              <button id="qual-med" type="button" class="mode on">MED</button>
+              <button id="qual-high" type="button" class="mode">HIGH</button>
+            </div>
+          </div>
+          <div class="set-row">
+            <span>Screen shake</span>
+            <button id="set-shake" type="button" class="toggle on">ON</button>
+          </div>
+          <div class="set-row">
+            <span>Invert steer</span>
+            <button id="set-invert" type="button" class="toggle">OFF</button>
+          </div>
+          <div class="set-row">
+            <span>Flashes</span>
+            <button id="set-flash" type="button" class="toggle on">ON</button>
+          </div>
+          <div class="set-row">
+            <span>Scanlines</span>
+            <button id="set-scanlines" type="button" class="toggle on">ON</button>
+          </div>
+          <div class="set-row">
+            <span>Vignette</span>
+            <button id="set-vignette" type="button" class="toggle on">ON</button>
+          </div>
+        </div>
+        <div class="end-actions">
+          <button id="settings-resume" type="button" class="hidden">RESUME</button>
+          <button id="settings-back" type="button" class="ghost">BACK</button>
+        </div>
+      </div>
+    </div>
+
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
