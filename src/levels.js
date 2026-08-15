@@ -49,6 +49,14 @@ function cxAt(i, path, zig, freq) {
       return Math.sin(i * f) * z * 0.72 + Math.cos(i * f * 0.51) * z * 0.52;
     case "pulse":
       return Math.sin(i * f * 0.5) * z * 0.4;
+    case "twist":
+      return Math.sin(i * f) * z * 0.55 + Math.sin(i * f * 2.15) * z * 0.42;
+    case "coil":
+      return Math.sin(i * f * 0.42) * z + Math.cos(i * f * 1.28) * z * 0.38;
+    case "ridge":
+      return Math.sign(Math.sin(i * f) || 1) * z * 0.82 + Math.sin(i * f * 0.18) * z * 0.22;
+    case "double":
+      return Math.sin(i * f) * z * 0.68 + Math.sin(i * f * 0.31 + 1.1) * z * 0.52;
     default:
       return 0;
   }
@@ -107,7 +115,13 @@ function pairT(seg, r) {
   return Math.min(0.82, (r + 0.42) / half);
 }
 
-function placeBalls(segments, goal, rng, spec, maxTier, minTier = 1) {
+function maybeTri(value, rng, tri) {
+  if (!tri || rng() > 0.3) return value;
+  const e = typeof value === "bigint" ? value : BigInt(value);
+  return { k: 3n, e: e - 1n };
+}
+
+function placeBalls(segments, goal, rng, spec, maxTier, minTier = 1, tri = false) {
   const balls = [];
   const layout = spec.layout;
   const startVal = toBigTier(minTier);
@@ -120,7 +134,8 @@ function placeBalls(segments, goal, rng, spec, maxTier, minTier = 1) {
 
   while (z < goal - 14) {
     const seg = trackAt(segments, z);
-    const value = z < 28 ? startVal : valueAt(z, goal, maxTier, rng, minTier);
+    let value = z < 28 ? startVal : valueAt(z, goal, maxTier, rng, minTier);
+    if (z >= 36) value = maybeTri(value, rng, tri);
     const r = radiusFor(value);
     const off = pairT(seg, r);
     const pairChance =
@@ -134,13 +149,15 @@ function placeBalls(segments, goal, rng, spec, maxTier, minTier = 1) {
       balls.push([z, safeX(seg, (rng() - 0.5) * 0.28, r), value]);
     } else if (layout === "lanes") {
       balls.push([z, safeX(seg, -off, r), value]);
-      const other = rng() < 0.45 ? value : valueAt(z, goal, maxTier, rng, minTier);
+      let other = rng() < 0.45 ? value : valueAt(z, goal, maxTier, rng, minTier);
+      if (z >= 36) other = maybeTri(other, rng, tri);
       balls.push([z, safeX(seg, off, radiusFor(other)), other]);
       if (rng() < 0.28 && r < 0.9) balls.push([z, safeX(seg, 0, radiusFor(startVal)), startVal]);
     } else if (layout === "scatter") {
       const n = 1 + Math.floor(rng() * 3);
       for (let k = 0; k < n; k++) {
-        const v = rng() < 0.7 ? value : valueAt(z, goal, maxTier, rng, minTier);
+        let v = rng() < 0.7 ? value : valueAt(z, goal, maxTier, rng, minTier);
+        if (z >= 36) v = maybeTri(v, rng, tri);
         const vr = radiusFor(v);
         balls.push([z + k * Math.max(0.5, vr * 0.35), safeX(seg, rng() * 2 - 1, vr), v]);
       }
@@ -154,7 +171,8 @@ function placeBalls(segments, goal, rng, spec, maxTier, minTier = 1) {
         balls.push([z, safeX(seg, rng() * 2 - 1, r), value]);
       } else if (lanes === 2) {
         balls.push([z, safeX(seg, -off, r), value]);
-        const other = rng() < 0.4 ? value : valueAt(z, goal, maxTier, rng, minTier);
+        let other = rng() < 0.4 ? value : valueAt(z, goal, maxTier, rng, minTier);
+        if (z >= 36) other = maybeTri(other, rng, tri);
         balls.push([z, safeX(seg, off, radiusFor(other)), other]);
       } else {
         balls.push([z, safeX(seg, -off, r), value]);
@@ -224,6 +242,22 @@ function placeSpikes(segments, goal, rng, spec, infinity, spikeMul = 1) {
   return spikes;
 }
 
+function placeMulWalls(segments, goal, rng, spec, infinity) {
+  const walls = [];
+  let count = infinity
+    ? Math.max(4, Math.min(9, Math.round(spec.spikes * 0.42)))
+    : Math.max(3, Math.min(8, Math.round(spec.spikes * 0.55)));
+  const start = 32;
+  const span = Math.max(48, goal - 46 - start);
+  for (let i = 0; i < count; i++) {
+    let z = start + ((i + 0.35) / count) * span;
+    z += (rng() - 0.5) * 5;
+    const seg = trackAt(segments, z);
+    walls.push({ z, x: seg.cx, w: Math.max(4.2, seg.width * 0.86) });
+  }
+  return walls;
+}
+
 const RAW = [
   ["First Roll", 230, 8.0, 0.0, "straight", 0.9, 2, "center", 16, 0.25, 1.0, "mix", "random"],
   ["Twin Lanes", 238, 7.8, 0.0, "straight", 0.9, 3, "sides", 16, 0.2, 1.0, "lanes", "lanes"],
@@ -289,13 +323,45 @@ const RAW = [
   ["Rainbow Road", 598, 7.6, 3.05, "snake", 0.74, 17, "weave", 2048, 0.4, 1.47, "mix", "random"],
   ["The Integer", 606, 7.5, 2.9, "helix", 0.66, 16, "stagger", 2048, 0.42, 1.48, "pairs", "lanes"],
   ["Beyond", 620, 7.6, 3.2, "s", 0.5, 18, "wall", 2048, 0.32, 1.5, "mix", "random"],
+  ["Prism Run", 628, 7.6, 3.0, "twist", 0.72, 16, "weave", 2048, 0.34, 1.48, "mix", "random"],
+  ["Ice Mirror", 634, 7.7, 2.6, "sine", 0.64, 15, "sides", 2048, 0.36, 1.49, "pairs", "center"],
+  ["Gold Rush", 640, 7.8, 2.4, "sweep", 0.5, 14, "center", 2048, 0.4, 1.5, "center", "center"],
+  ["Neon Alley", 646, 7.4, 0.4, "straight", 0.9, 19, "wall", 2048, 0.26, 1.5, "lanes", "lanes"],
+  ["Afterimage", 652, 7.5, 2.8, "coil", 0.7, 16, "stagger", 2048, 0.3, 1.51, "stagger", "sides"],
+  ["Crush Hour", 658, 7.4, 2.2, "ridge", 0.88, 18, "bursts", 2048, 0.28, 1.52, "scatter", "random"],
+  ["Velvet Spike", 664, 7.5, 3.1, "s", 0.58, 17, "weave", 2048, 0.32, 1.52, "mix", "random"],
+  ["Helix Peak", 670, 7.5, 3.0, "helix", 0.74, 16, "weave", 2048, 0.34, 1.53, "mix", "random"],
+  ["Twin Storm", 676, 7.6, 2.7, "double", 0.8, 17, "pairs", 2048, 0.3, 1.53, "lanes", "lanes"],
+  ["Zero Point", 682, 7.5, 1.8, "pulse", 1.08, 16, "scatter", 2048, 0.36, 1.54, "mix", "random"],
+  ["Mirage", 688, 7.8, 2.9, "drift", 0.55, 15, "center", 2048, 0.32, 1.54, "scatter", "random"],
+  ["Overclock", 696, 8.0, 1.6, "sweep", 0.46, 14, "weave", 2048, 0.34, 1.56, "center", "center"],
+  ["Black Ice", 702, 7.4, 3.2, "twist", 0.9, 18, "sides", 2048, 0.28, 1.55, "stagger", "sides"],
+  ["Firewalk", 708, 7.4, 2.4, "step", 0.9, 19, "wall", 2048, 0.24, 1.56, "lanes", "lanes"],
+  ["Orbit", 714, 7.6, 3.15, "coil", 0.62, 16, "weave", 2048, 0.34, 1.56, "mix", "random"],
+  ["Shatter", 720, 7.4, 2.0, "zigzag", 0.96, 19, "bursts", 2048, 0.26, 1.57, "scatter", "random"],
+  ["Momentum", 728, 7.7, 2.5, "double", 0.68, 15, "stagger", 2048, 0.38, 1.58, "pairs", "center"],
+  ["Deep Cut", 734, 7.4, 3.0, "snake", 0.78, 18, "weave", 2048, 0.3, 1.57, "mix", "random"],
+  ["Sky Needle", 740, 7.5, 3.3, "s", 0.48, 16, "sides", 2048, 0.32, 1.58, "center", "center"],
+  ["Warp Gate", 748, 7.5, 2.8, "helix", 1.05, 17, "scatter", 2048, 0.3, 1.59, "mix", "random"],
+  ["Pulse King", 754, 7.6, 1.4, "pulse", 1.18, 16, "pairs", 2048, 0.4, 1.59, "pairs", "center"],
+  ["Iron Ribbon", 760, 7.4, 2.6, "ridge", 0.84, 19, "wall", 2048, 0.26, 1.6, "stagger", "sides"],
+  ["Super Slalom", 768, 7.4, 3.25, "sine", 0.86, 17, "weave", 2048, 0.3, 1.6, "stagger", "sides"],
+  ["Crown", 774, 7.6, 2.9, "twist", 0.66, 16, "center", 2048, 0.42, 1.6, "pairs", "center"],
+  ["Afterburn", 782, 8.0, 1.9, "sweep", 0.44, 15, "scatter", 2048, 0.34, 1.62, "center", "center"],
+  ["Infinite Bend", 788, 7.5, 3.35, "coil", 0.58, 17, "weave", 2048, 0.32, 1.61, "mix", "random"],
+  ["Last Merge", 796, 7.5, 0.2, "straight", 0.9, 18, "bursts", 2048, 0.7, 1.61, "pairs", "center"],
+  ["Chromatic", 804, 7.6, 3.1, "double", 0.74, 16, "weave", 2048, 0.38, 1.62, "mix", "random"],
+  ["Big Bang", 812, 7.5, 2.7, "helix", 0.92, 18, "wall", 2048, 0.28, 1.63, "scatter", "random"],
+  ["Singularity", 820, 7.4, 3.4, "s", 0.52, 19, "stagger", 2048, 0.3, 1.64, "mix", "random"],
+  ["The Ceiling", 828, 7.5, 3.2, "twist", 0.7, 18, "weave", 2048, 0.4, 1.64, "pairs", "lanes"],
+  ["MP Forever", 840, 7.6, 3.45, "coil", 0.6, 20, "wall", 2048, 0.36, 1.66, "mix", "random"],
 ];
 
 const SPECS = RAW.map((row, index) => {
   const [
     name, goal, w, zig, path, freq, spikes, spikeStyle, max, pair, speed, layout, scatter,
   ] = row;
-  const hard = index / 63;
+  const hard = index / Math.max(1, RAW.length - 1);
   return {
     index,
     name,
@@ -355,6 +421,8 @@ export function getLevel(index, infinity = false, superMode = false, extra = {})
       : BigInt(endless ? 1024 : superMode ? 128 : infinity ? 63 : Math.max(1, magTier(BigInt(spec.max))));
   if (topTier < minTier) topTier = minTier;
   const segments = buildSegments(goal, spec);
+  const infTrack = infinity || superMode || endless;
+  const tri = !!extra.mulWalls;
   return {
     id: i + 1,
     index: i,
@@ -363,15 +431,9 @@ export function getLevel(index, infinity = false, superMode = false, extra = {})
     speed: spec.speed,
     path: spec.path,
     segments,
-    balls: placeBalls(segments, goal, rng, spec, topTier, minTier),
-    spikes: placeSpikes(
-      segments,
-      goal,
-      rng,
-      spec,
-      infinity || superMode || endless,
-      extra.spikeMul || 1
-    ),
+    balls: placeBalls(segments, goal, rng, spec, topTier, minTier, tri),
+    spikes: placeSpikes(segments, goal, rng, spec, infTrack, extra.spikeMul || 1),
+    mulWalls: tri ? placeMulWalls(segments, goal, rng, spec, infTrack) : [],
   };
 }
 

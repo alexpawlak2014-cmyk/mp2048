@@ -7,6 +7,7 @@ export const SUPER_LABEL = "340,282,366,920,938,463,463,374,607,431,768,211,456"
 export function toVal(v) {
   try {
     if (typeof v === "bigint") return v;
+    if (v && typeof v === "object" && "e" in v) return toVal(v.e);
     if (typeof v === "number" && Number.isFinite(v)) return BigInt(Math.trunc(v));
     return BigInt(String(v));
   } catch {
@@ -14,11 +15,61 @@ export function toVal(v) {
   }
 }
 
+export function asVal(v) {
+  if (v && typeof v === "object" && "e" in v) {
+    let k = 1n;
+    try {
+      k = typeof v.k === "bigint" ? v.k : BigInt(v.k ?? 1);
+    } catch {
+      k = 1n;
+    }
+    if (k <= 0n) k = 1n;
+    return { k, e: toVal(v.e) };
+  }
+  return { k: 1n, e: toVal(v) };
+}
+
+export function valEq(a, b) {
+  const x = asVal(a);
+  const y = asVal(b);
+  return x.k === y.k && x.e === y.e;
+}
+
+export function magCmp(a, b) {
+  const x = asVal(a);
+  const y = asVal(b);
+  if (x.e >= y.e) {
+    const left = x.k << (x.e - y.e);
+    if (left > y.k) return 1;
+    if (left < y.k) return -1;
+    return 0;
+  }
+  const right = y.k << (y.e - x.e);
+  if (x.k > right) return 1;
+  if (x.k < right) return -1;
+  return 0;
+}
+
+function triCount(k) {
+  let t = 0;
+  let x = k;
+  while (x > 1n && x % 3n === 0n && t < 40) {
+    x /= 3n;
+    t += 1;
+  }
+  return t;
+}
+
+export function magLog2(value) {
+  const { k, e } = asVal(value);
+  return Number(e) + triCount(k) * 1.5849625;
+}
+
 export function tierOf(value) {
-  const v = toVal(value);
-  if (v > 1000000n) return 1000000;
-  if (v < -1000000n) return -1000000;
-  return Number(v);
+  const n = magLog2(value);
+  if (n > 1000000) return 1000000;
+  if (n < -1000000) return -1000000;
+  return n;
 }
 
 export function fromTier(tier) {
@@ -43,13 +94,42 @@ export function radiusFor(value) {
 }
 
 export function doubleVal(value, _max) {
-  return toVal(value) + 1n;
+  const x = asVal(value);
+  return x.k === 1n ? x.e + 1n : { k: x.k, e: x.e + 1n };
 }
 
 export function halfVal(value, floor = 1n) {
-  const next = toVal(value) - 1n;
-  const f = toVal(floor);
-  return next < f ? f : next;
+  const x = asVal(value);
+  const next = x.k === 1n ? x.e - 1n : { k: x.k, e: x.e - 1n };
+  if (magCmp(next, floor) < 0) return asVal(floor).k === 1n ? asVal(floor).e : asVal(floor);
+  return next;
+}
+
+export function mul15(value) {
+  const x = asVal(value);
+  return { k: x.k * 3n, e: x.e - 1n };
+}
+
+export function serializeVal(value) {
+  const x = asVal(value);
+  return x.k === 1n ? x.e.toString() : `${x.k}:${x.e}`;
+}
+
+export function parseVal(raw) {
+  const s = String(raw ?? "");
+  if (s.includes(":")) {
+    const [k, e] = s.split(":");
+    try {
+      return { k: BigInt(k), e: BigInt(e) };
+    } catch {
+      return 1n;
+    }
+  }
+  try {
+    return BigInt(s);
+  } catch {
+    return 1n;
+  }
 }
 
 export function formatValue(value) {
@@ -71,8 +151,7 @@ const COMPACT_UNITS = [
   [10n ** 3n, "K"],
 ];
 
-export function shortValue(value) {
-  const e = toVal(value);
+function formatPow2(e) {
   if (e === 0n) return "1";
   if (e < 0n) {
     const n = Number(e);
@@ -95,6 +174,21 @@ export function shortValue(value) {
   return `2^${e}`;
 }
 
+export function shortValue(value) {
+  const { k, e } = asVal(value);
+  if (k === 1n) return formatPow2(e);
+  if (e >= 0n && e < 20n) {
+    const mag = k << e;
+    if (mag < 100000n) return mag.toString();
+  }
+  if (e < 0n && e >= -8n && k < 10000n) {
+    const n = Number(k) * 2 ** Number(e);
+    if (Number.isFinite(n)) return String(Number(n.toPrecision(6)));
+  }
+  if (k === 3n) return e === 0n ? "3" : `3·2^${e}`;
+  return `${k}·2^${e}`;
+}
+
 export function padLabel(value) {
   return { main: shortValue(value), sub: "" };
 }
@@ -111,17 +205,7 @@ function lum(hex) {
   return 0.2126 * r + 0.7152 * g + 0.0722 * b;
 }
 
-export function padColor(value) {
-  const tier = tierOf(value);
-  if (tier < 1) {
-    const t = Math.max(0, 8 + tier);
-    const ice = 0x6ec8ff - t * 0x081018;
-    return ice > 0 ? ice : 0x3a6aa8;
-  }
-  if (tier >= 1 && tier <= TIER_HEX.length) return TIER_HEX[tier - 1];
-  const h = (tier * 0.173) % 1;
-  const s = 0.78;
-  const l = 0.52;
+function hslHex(h, s, l) {
   const a = s * Math.min(l, 1 - l);
   const f = (n) => {
     const k = (n + h * 12) % 12;
@@ -129,6 +213,22 @@ export function padColor(value) {
     return Math.round(255 * c);
   };
   return (f(0) << 16) + (f(8) << 8) + f(4);
+}
+
+export function padColor(value) {
+  const { k } = asVal(value);
+  const tier = tierOf(value);
+  if (k !== 1n) {
+    return hslHex((0.14 + triCount(k) * 0.08 + tier * 0.03) % 1, 0.82, 0.52);
+  }
+  if (tier < 1) {
+    const t = Math.max(0, 8 + tier);
+    const ice = 0x6ec8ff - t * 0x081018;
+    return ice > 0 ? ice : 0x3a6aa8;
+  }
+  const nearest = Math.round(tier);
+  if (nearest >= 1 && nearest <= TIER_HEX.length) return TIER_HEX[nearest - 1];
+  return hslHex((tier * 0.173) % 1, 0.78, 0.52);
 }
 
 export function styleFor(value) {
@@ -139,5 +239,5 @@ export function styleFor(value) {
 
 export function isRainbow(value, max) {
   if (max == null) return false;
-  return toVal(value) >= toVal(max);
+  return magLog2(value) + 1e-6 >= magLog2(max);
 }

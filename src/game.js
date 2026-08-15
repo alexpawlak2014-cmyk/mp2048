@@ -16,6 +16,11 @@ import {
   fromTier,
   doubleVal,
   halfVal,
+  mul15,
+  valEq,
+  magCmp,
+  serializeVal,
+  parseVal,
   shortValue,
   padLabel,
   padColor,
@@ -102,6 +107,8 @@ const SPIKE_RADIUS = 0.4;
 const SPIKE_TOP = 0.67;
 const SPIKE_BASE_GEO = new THREE.CylinderGeometry(SPIKE_RADIUS, SPIKE_RADIUS, 0.12, 8);
 const SPIKE_CONE_GEO = new THREE.ConeGeometry(0.12, 0.58, 5);
+const MUL_SLAB_GEO = new THREE.BoxGeometry(1, 1.45, 0.28);
+const MUL_POST_GEO = new THREE.BoxGeometry(0.22, 1.7, 0.22);
 
 function hexCss(n) {
   return `#${n.toString(16).padStart(6, "0")}`;
@@ -526,16 +533,17 @@ export class MP2048 {
     const start = this.startValue();
     const k = this.mapKind();
     const spikeMul = k === "half" || k === "halfinf" ? 1.5 : 1;
+    const mulWalls = k === "half" || k === "halfinf";
     if (k === "custom") {
       let cap = this.sandbox ? this.sandboxCeil : this.customCap;
       if (cap < start) cap = start;
       const span = cap - start;
       const spanN = span > 1000000n ? 1000000 : Number(span);
       const climb = spanN > 12 ? spanN : 0;
-      return { minTier: start, climb, topTier: cap, spikeMul };
+      return { minTier: start, climb, topTier: cap, spikeMul, mulWalls };
     }
-    if (k === "half") return { minTier: start, topTier: start + 10n, spikeMul };
-    if (k === "halfinf") return { minTier: start, climb: 62, topTier: start + 62n, spikeMul };
+    if (k === "half") return { minTier: start, topTier: start + 10n, spikeMul, mulWalls };
+    if (k === "halfinf") return { minTier: start, climb: 62, topTier: start + 62n, spikeMul, mulWalls };
     if (k === "2048") return { minTier: start, topTier: start + 10n, spikeMul };
     if (k === "inf") return { minTier: start, climb: 62, topTier: start + 62n, spikeMul };
     if (k === "super") return { minTier: start, climb: 127, topTier: start + 127n, spikeMul };
@@ -545,7 +553,7 @@ export class MP2048 {
   loadBest() {
     try {
       const eRaw = localStorage.getItem(`${this.bestKey()}-e`);
-      if (eRaw != null && eRaw !== "") return BigInt(eRaw);
+      if (eRaw != null && eRaw !== "") return parseVal(eRaw);
       const old = localStorage.getItem(this.bestKey());
       if (old == null || old === "" || old === "0") return null;
       return BigInt(magTier(BigInt(old)));
@@ -725,7 +733,7 @@ export class MP2048 {
   buildStreaks() {
     const geo = new THREE.BoxGeometry(0.04, 0.04, 4.4);
     this.streaks = [];
-    for (let i = 0; i < 8; i++) {
+    for (let i = 0; i < 12; i++) {
       const mat = new THREE.MeshBasicMaterial({
         color: 0xffffff,
         transparent: true,
@@ -742,7 +750,7 @@ export class MP2048 {
 
   buildFxPool() {
     this.sparks = [];
-    for (let i = 0; i < 24; i++) {
+    for (let i = 0; i < 36; i++) {
       const mesh = new THREE.Mesh(
         SPARK_GEO,
         new THREE.MeshBasicMaterial({
@@ -757,7 +765,7 @@ export class MP2048 {
       this.sparks.push({ mesh, vx: 0, vy: 0, vz: 0, life: 0, spin: false });
     }
     this.confettis = [];
-    for (let i = 0; i < 10; i++) {
+    for (let i = 0; i < 20; i++) {
       const mesh = new THREE.Mesh(CONFETTI_GEO, new THREE.MeshBasicMaterial({ color: 0xffe14a }));
       mesh.visible = false;
       this.scene.add(mesh);
@@ -1044,11 +1052,12 @@ export class MP2048 {
     }
     this.pickups = [];
     this.spikes = [];
+    this.mulWalls = [];
   }
 
   ballTexture(value) {
     const rainbow = isRainbow(value, this.maxValue);
-    const key = `t${tierOf(value)}-${rainbow ? "r" : "n"}`;
+    const key = `${serializeVal(value)}-${rainbow ? "r" : "n"}`;
     if (this.texCache.has(key)) return this.texCache.get(key);
     const p = styleFor(value);
     const canvas = document.createElement("canvas");
@@ -1099,7 +1108,7 @@ export class MP2048 {
 
   ballMaterial(value) {
     const rainbow = isRainbow(value, this.maxValue);
-    const key = `t${tierOf(value)}-${rainbow ? "r" : "n"}`;
+    const key = `${serializeVal(value)}-${rainbow ? "r" : "n"}`;
     if (this.matCache.has(key) && !rainbow) return this.matCache.get(key).clone();
     const p = styleFor(value);
     const mat = new THREE.MeshStandardMaterial({
@@ -1121,6 +1130,9 @@ export class MP2048 {
     }
     for (const [z, x] of this.level.spikes) {
       this.spawnSpike(x, z);
+    }
+    for (const w of this.level.mulWalls || []) {
+      this.spawnMulWall(w);
     }
     this.spawnPowerups();
   }
@@ -1174,6 +1186,68 @@ export class MP2048 {
     this.spikes.push({ x, z, group, mat: spikeMat, near: false });
   }
 
+  mulWallTexture() {
+    if (this._mulTex) return this._mulTex;
+    const canvas = document.createElement("canvas");
+    canvas.width = 256;
+    canvas.height = 128;
+    const ctx = canvas.getContext("2d");
+    ctx.clearRect(0, 0, 256, 128);
+    ctx.fillStyle = "rgba(20, 12, 0, 0.2)";
+    ctx.fillRect(0, 0, 256, 128);
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.font = "900 64px Nunito, sans-serif";
+    ctx.lineWidth = 10;
+    ctx.strokeStyle = "#3a2208";
+    ctx.strokeText("×1.5", 128, 64);
+    ctx.fillStyle = "#ffe14a";
+    ctx.fillText("×1.5", 128, 64);
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    this._mulTex = tex;
+    return tex;
+  }
+
+  spawnMulWall(spec) {
+    const z = spec.z;
+    const x = spec.x;
+    const w = spec.w;
+    const group = new THREE.Group();
+    const gold = new THREE.MeshStandardMaterial({
+      color: 0xffc44a,
+      emissive: 0xff9a1a,
+      emissiveIntensity: 0.42,
+      roughness: 0.28,
+      metalness: 0.35,
+      transparent: true,
+      opacity: 0.78,
+    });
+    const slab = new THREE.Mesh(MUL_SLAB_GEO, gold);
+    slab.scale.set(w, 1, 1);
+    slab.position.y = 0.72;
+    group.add(slab);
+    const left = new THREE.Mesh(MUL_POST_GEO, gold);
+    left.position.set(-w * 0.5, 0.85, 0);
+    group.add(left);
+    const right = new THREE.Mesh(MUL_POST_GEO, gold.clone());
+    right.position.set(w * 0.5, 0.85, 0);
+    group.add(right);
+    const label = new THREE.Mesh(
+      new THREE.PlaneGeometry(Math.min(3.6, w * 0.7), 0.85),
+      new THREE.MeshBasicMaterial({ map: this.mulWallTexture(), transparent: true, depthWrite: false })
+    );
+    label.position.set(0, 1.55, 0.18);
+    group.add(label);
+    const labelB = label.clone();
+    labelB.rotation.y = Math.PI;
+    labelB.position.z = -0.18;
+    group.add(labelB);
+    group.position.set(x, 0, z);
+    this.worldGroup.add(group);
+    this.mulWalls.push({ x, z, w, group, used: false, mat: gold });
+  }
+
   spawnPowerups() {
     this.powerups = [];
     const goal = this.goalZ;
@@ -1214,9 +1288,11 @@ export class MP2048 {
       p.mesh.parent?.remove(p.mesh);
     }
     for (const s of this.spikes) s.group.parent?.remove(s.group);
+    for (const w of this.mulWalls) w.group.parent?.remove(w.group);
     for (const u of this.powerups) u.mesh.parent?.remove(u.mesh);
     this.pickups = [];
     this.spikes = [];
+    this.mulWalls = [];
     this.powerups = [];
   }
 
@@ -1557,9 +1633,9 @@ export class MP2048 {
               : mode === "custom"
                 ? `Pick the rainbow. Ceiling is ${expLabel(this.customCap)}. Rainbows still merge.`
                 : mode === "half"
-                  ? "Classic 2048, but spikes are 1.5× denser. Start at 2. Halve to 1, 0.5, … down to 2^-31."
+                  ? "Classic 2048 plus gold ×1.5 walls: 2 becomes 3. Spikes still half you down to 2^-31."
                   : mode === "halfinf"
-                    ? "Half rules, Infinity climb. Start at 2, split to 2^-31, merge toward 2^63."
+                    ? "Half rules, Infinity climb. Gold ×1.5 walls turn 2 into 3. Split to 2^-31, merge toward 2^63."
                     : `Steer into matching numbers to grow. Spikes cut you in half. Fall off the rail and you start over. Can you make ${shortValue(cap)}?`;
   }
 
@@ -1622,7 +1698,7 @@ export class MP2048 {
     this.els.settings?.classList.add("hidden");
     this.els.pauseBtn?.classList.add("hidden");
     this.menu = null;
-    document.body.classList.remove("fever", "boosting");
+    document.body.classList.remove("fever", "boosting", "cleared");
     this.refreshWallet();
     this.resetPlayerPose();
     this.idlePreview();
@@ -1673,7 +1749,8 @@ export class MP2048 {
     this.showCombo();
     this.resetPlayerPose();
     this.resetStreaks();
-    this.flash(0.16);
+    this.flash(0.2);
+    this.toast(this.level.name);
     this.updateBadge();
     this.updateBuffHud();
     this.els.title.classList.add("hidden");
@@ -1683,6 +1760,7 @@ export class MP2048 {
     this.els.hud.classList.remove("hidden");
     this.els.pauseBtn?.classList.remove("hidden");
     this.menu = null;
+    document.body.classList.remove("cleared");
     this.refreshWallet();
     this.clock.getDelta();
   }
@@ -1761,6 +1839,7 @@ export class MP2048 {
       : hexCss(p.color);
     this.els.badge.style.color = rainbow ? "#ffffff" : p.text;
     this.els.badge.style.fontSize = label.length > 4 ? "22px" : "34px";
+    this.els.badge.classList.toggle("rainbow", rainbow);
     this.els.badge.classList.remove("pop");
     void this.els.badge.offsetWidth;
     this.els.badge.classList.add("pop");
@@ -1791,6 +1870,7 @@ export class MP2048 {
     this.els.combo.classList.remove("hidden");
     this.els.combo.textContent = `x${this.combo}`;
     this.els.combo.style.color = this.combo >= 8 ? "#ffe14a" : this.combo >= 5 ? "#ff4fd8" : "#ffffff";
+    this.els.combo.classList.toggle("hot", this.combo >= 8);
     this.els.combo.classList.remove("pop");
     void this.els.combo.offsetWidth;
     this.els.combo.classList.add("pop");
@@ -1988,6 +2068,7 @@ export class MP2048 {
         const xBeforeHit = p.x;
         this.collidePickups(speed);
         this.collideSpikes();
+        this.collideMulWalls();
         if (this.onFloor(xBeforeHit, p.z, p.r) && !this.onFloor(p.x, p.z, p.r)) {
           this.keepOnDeck(p, true);
         }
@@ -2052,6 +2133,11 @@ export class MP2048 {
       for (const s of this.spikes) {
         if (s.mat && Math.abs(s.z - p.z) < 36) s.mat.emissiveIntensity = pulse;
       }
+      for (const w of this.mulWalls) {
+        if (!w.used && w.mat && Math.abs(w.z - p.z) < 36) {
+          w.mat.emissiveIntensity = 0.32 + Math.sin(this.clock.elapsedTime * 6) * 0.18;
+        }
+      }
     }
     if (isRainbow(p.value, this.maxValue) && p.mat) {
       const h = (this.clock.elapsedTime * 0.55) % 1;
@@ -2103,7 +2189,7 @@ export class MP2048 {
       if (!b.alive || b.falling) continue;
       if (Math.abs(b.z - p.z) > 14 || Math.abs(b.x - p.x) > 12) {
         b.touching = false;
-        if ((this.magnet > 0 || this.fever > 0) && b.value === p.value && Math.abs(b.z - p.z) < 22 + this.up("magnet") * 7) {
+        if ((this.magnet > 0 || this.fever > 0) && valEq(b.value, p.value) && Math.abs(b.z - p.z) < 22 + this.up("magnet") * 7) {
           const pull = 0.08 + this.up("magnet") * 0.025;
           b.x += (p.x - b.x) * pull;
           b.z += (p.z + p.r + b.r - b.z) * 0.05;
@@ -2116,7 +2202,7 @@ export class MP2048 {
         continue;
       }
 
-      if (b.value === p.value && this.canGrow(p.value)) {
+      if (valEq(b.value, p.value) && this.canGrow(p.value)) {
         this.mergePlayer(b);
         continue;
       }
@@ -2146,9 +2232,9 @@ export class MP2048 {
     this.burst(this.player.x, this.player.y, this.player.z, this.player.value);
     this.shockwave(this.player.x, this.player.y, this.player.z, styleFor(next).color);
     this.player.value = next;
-    this.squash = this.superMode ? 1.62 : 1.42;
-    this.shake = this.settings.shake ? Math.min(1.25, 0.32 + tierOf(next) * 0.012) : 0;
-    this.fovPunch = this.superMode ? 12 : 7;
+    this.squash = this.superMode ? 1.72 : 1.52;
+    this.shake = this.settings.shake ? Math.min(1.35, 0.36 + Math.max(0, tierOf(next)) * 0.012) : 0;
+    this.fovPunch = this.superMode ? 13 : 8;
     this.combo += 1;
     this.comboTimer = 1.7 + this.up("combo") * 0.28;
     this.merges += 1;
@@ -2168,6 +2254,7 @@ export class MP2048 {
     if (this.combo >= 5) this.sfx.sparkle(this.combo);
     this.toast(this.combo >= 8 ? `x${this.combo}  ${shortValue(next)}` : shortValue(next));
     if (navigator.vibrate) navigator.vibrate(18);
+    if (this.combo >= 8) this.confetti(this.player.x, this.player.y, this.player.z);
     if (isRainbow(next, this.maxValue)) {
       this.toast("RAINBOW!");
       this.confetti(this.player.x, this.player.y, this.player.z);
@@ -2190,6 +2277,37 @@ export class MP2048 {
         this.toast("CLOSE!");
         this.sfx.sparkle(3);
       }
+    }
+  }
+
+  collideMulWalls() {
+    const p = this.player;
+    for (const w of this.mulWalls) {
+      if (w.used) continue;
+      if (Math.abs(w.z - p.z) > 2.4) continue;
+      const half = w.w * 0.5;
+      if (Math.abs(p.x - w.x) > half + p.r * 0.15) continue;
+      if (Math.abs(w.z - p.z) > 0.42 + p.r) continue;
+      this.hitMulWall(w);
+      break;
+    }
+  }
+
+  hitMulWall(w) {
+    w.used = true;
+    const next = mul15(this.player.value);
+    this.player.value = next;
+    this.squash = 1.38;
+    this.applyPlayerLook();
+    this.updateBadge();
+    this.toast(`×1.5  ${shortValue(next)}`);
+    this.sfx.sparkle(7);
+    this.burst(this.player.x, this.player.y, this.player.z, next);
+    this.shockwave(this.player.x, this.player.y, this.player.z, 0xffe14a);
+    this.flash(0.16, "#ffe14a");
+    this.fovPunch = 6;
+    if (w.group) {
+      w.group.visible = false;
     }
   }
 
@@ -2250,7 +2368,7 @@ export class MP2048 {
     this.invuln = 0.7;
     const prev = this.player.value;
     const floor = this.floorExp();
-    if (prev <= floor) {
+    if (magCmp(prev, floor) <= 0) {
       if (this.lives > 0) {
         this.lives -= 1;
         this.invuln = 1.1;
@@ -2271,7 +2389,7 @@ export class MP2048 {
       return;
     }
     const next = halfVal(prev, floor);
-    if (prev > floor) {
+    if (prev && magCmp(prev, floor) > 0) {
       const side = this.player.x >= 0 ? -1 : 1;
       this.spawnPickup(
         this.player.x + side * (this.player.r + radiusFor(next) + 0.12),
@@ -2307,6 +2425,9 @@ export class MP2048 {
     }
     for (const s of this.spikes) {
       s.group.visible = Math.abs(s.z - z) < 90;
+    }
+    for (const w of this.mulWalls) {
+      if (!w.used) w.group.visible = Math.abs(w.z - z) < 90;
     }
     for (const u of this.powerups) {
       if (u.alive) u.mesh.visible = Math.abs(u.z - z) < 90;
@@ -2350,7 +2471,7 @@ export class MP2048 {
         const b = list[j];
         if (!a.alive || !b.alive || a.falling || b.falling) continue;
         if (!sphereHit(a.x, a.y, a.z, a.r, b.x, b.y, b.z, b.r)) continue;
-        if (a.value === b.value && this.canGrow(a.value)) {
+        if (valEq(a.value, b.value) && this.canGrow(a.value)) {
           const nx = (a.x + b.x) / 2;
           const nz = (a.z + b.z) / 2;
           b.alive = false;
@@ -2432,7 +2553,7 @@ export class MP2048 {
     ghost.scale.setScalar(p.r * 0.96);
     ghost.material.color.setHex(styleFor(p.value).color);
     this.ghosts.unshift(ghost);
-    const base = this.superMode ? 0.2 : 0.1;
+    const base = this.fever > 0 ? 0.34 : this.superMode ? 0.22 : 0.14;
     for (let i = 0; i < this.ghosts.length; i++) {
       this.ghosts[i].material.opacity = base * (1 - i / this.ghosts.length);
     }
@@ -2478,7 +2599,7 @@ export class MP2048 {
   updateStreaks(dt) {
     if (!this.streaks?.length) return;
     const p = this.player;
-    const on = this.state === "play" && (this.settings.quality === "high" || this.boost > 0 || this.fever > 0);
+    const on = this.state === "play";
     for (const s of this.streaks) {
       if (!on) {
         s.mesh.visible = false;
@@ -2499,7 +2620,7 @@ export class MP2048 {
             ? [0xff9ad8, 0xffe14a, 0xffffff]
             : [0xffffff, 0xffe4b8, 0xffc48a];
         s.mesh.material.color.setHex(neon[Math.floor(Math.random() * neon.length)]);
-        s.mesh.material.opacity = this.fever > 0 ? 0.42 : this.boost > 0 ? 0.32 : this.superMode ? 0.28 : 0.12;
+        s.mesh.material.opacity = this.fever > 0 ? 0.46 : this.boost > 0 ? 0.36 : this.superMode ? 0.3 : 0.18;
       }
     }
   }
@@ -2668,7 +2789,8 @@ export class MP2048 {
       if (idx > this.winPadIndex) {
         this.winPadIndex = idx;
         const pad = this.winPads[idx];
-        this.sfx.tile(0.7 + pad.tier * 0.09);
+        this.sfx.tile(0.55 + pad.tier * 0.08);
+        this.burst(0, pad.y + 0.4, pad.z, pad.value);
         this.shockwave(0, pad.y + 0.15, pad.z, padColor(pad.value));
         this.fovPunch = Math.min(8, 2 + idx * 0.08);
         if (pad.mesh?.material) pad.mesh.material.emissiveIntensity = 0.4;
@@ -2680,8 +2802,9 @@ export class MP2048 {
         this.winTimer = 0;
         this.burst(p.x, p.y, p.z, p.value);
         this.confetti(p.x, p.y, p.z);
+        this.confetti(p.x, p.y + 0.6, p.z + 1.2);
         this.shockwave(p.x, p.y, p.z, styleFor(p.value).color);
-        this.flash(0.22);
+        this.flash(0.28);
         this.toast(shortValue(p.value));
         this.sfx.win(p.value);
       }
@@ -2698,9 +2821,9 @@ export class MP2048 {
     if (this.state === "end") return;
     this.state = "end";
     const value = this.player.value;
-    if (this.best == null || value > this.best) {
+    if (this.best == null || magCmp(value, this.best) > 0) {
       this.best = value;
-      localStorage.setItem(`${this.bestKey()}-e`, value.toString());
+      localStorage.setItem(`${this.bestKey()}-e`, serializeVal(value));
       this.refreshBest();
     }
 
@@ -2716,6 +2839,7 @@ export class MP2048 {
     this.els.hud.classList.add("hidden");
     this.els.fever?.classList.add("hidden");
     this.els.pauseBtn?.classList.add("hidden");
+    document.body.classList.toggle("cleared", kind === "goal");
     document.body.classList.remove("fever", "boosting");
     this.els.end.classList.remove("hidden");
     this.els.endNumber.textContent = shortValue(value);

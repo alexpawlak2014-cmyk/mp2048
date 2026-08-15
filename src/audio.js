@@ -1,12 +1,20 @@
 function rateFromTier(tier, base, step) {
-  return base + Math.max(0, tier) * step;
+  return Math.max(0.28, Math.min(8, base + tier * step));
 }
 
 function tierOfValue(value) {
   try {
+    if (value && typeof value === "object" && "e" in value) {
+      const e = Number(value.e);
+      const k = Number(value.k || 1);
+      const n = (Number.isFinite(e) ? e : 1) + (k > 1 ? Math.log2(k) : 0);
+      if (n > 400) return 400;
+      if (n < -40) return -40;
+      return n;
+    }
     const v = typeof value === "bigint" ? value : BigInt(value);
-    if (v < 1n) return 1;
     if (v > 400n) return 400;
+    if (v < -40n) return -40;
     return Number(v);
   } catch {
     return 1;
@@ -85,12 +93,12 @@ export class Sfx {
   }
 
   tile(rate = 1) {
-    this.play("tile", { rate, gain: 0.85 });
+    this.play("tile", { rate: Math.max(0.28, Math.min(4, rate)), gain: 0.85 });
   }
 
   win(value = 2) {
     const tier = tierOfValue(value);
-    this.play("win", { rate: rateFromTier(tier, 0.55, 0.085), gain: 1 });
+    this.play("win", { rate: rateFromTier(tier, 0.48, 0.12), gain: 1 });
   }
 
   sparkle(combo = 5) {
@@ -117,5 +125,20 @@ export class Sfx {
 
   start() {
     this.ensure();
+    const ctx = this.ctx;
+    if (!ctx) return;
+    const o = ctx.createOscillator();
+    const g = ctx.createGain();
+    o.type = "sawtooth";
+    const t = ctx.currentTime;
+    o.frequency.setValueAtTime(180, t);
+    o.frequency.exponentialRampToValueAtTime(520, t + 0.16);
+    const amp = this.mix(0.06);
+    if (amp <= 0) return;
+    g.gain.setValueAtTime(amp, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 0.18);
+    o.connect(g).connect(ctx.destination);
+    o.start(t);
+    o.stop(t + 0.2);
   }
 }
